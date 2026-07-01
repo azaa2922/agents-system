@@ -20,10 +20,12 @@ const HELP = `
   --tone    ${TONES.join(" | ")}  (default: professional)
   --length  ${Object.keys(LENGTHS).join(" | ")}  (short ≈200, medium ≈500, long 1000+ үг; default: medium)
   --format  ${FORMATS.join(" | ")}  (default: blog)
+  --resume <sessionId>   Тасарсан session-ийг үргэлжлүүлэх (crash recovery)
 
 Үр дүн: output/content_YYYYMMDDHHmm.md — YAML frontmatter (title, date, format, tone, length)
 
 Шаардлага: .env дотор ANTHROPIC_API_KEY
+           (санах ойд нэмэлтээр FIREBASE_DATABASE_URL, FIREBASE_SERVICE_ACCOUNT_PATH)
 `;
 
 const argv = process.argv.slice(2);
@@ -45,6 +47,7 @@ try {
     tone: typeof flags.tone === "string" ? flags.tone : undefined,
     length: typeof flags.length === "string" ? flags.length : undefined,
     format: typeof flags.format === "string" ? flags.format : undefined,
+    resume: typeof flags.resume === "string" ? flags.resume : null,
   });
 } catch (err) {
   handleError(err);

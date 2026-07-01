@@ -1,6 +1,9 @@
 /**
  * DB Agent — өгөгдлийн сангийн schema, migration, query-г Claude-оор
  * зохиолгож SQL / Prisma / TypeORM файлд хадгална.
+ *
+ * Санах ой: generate → save алхмуудаар явж, алхам бүр Firebase-д бүртгэгдэнэ.
+ * Firebase тохируулаагүй бол санах ойгүйгээр адил ажиллана.
  */
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,6 +11,7 @@ import dotenv from "dotenv";
 import chalk from "chalk";
 import Anthropic from "@anthropic-ai/sdk";
 import fse from "fs-extra";
+import { runAgent } from "../core/runner.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const ROOT = path.resolve(__dirname, "..", "..");
@@ -103,6 +107,7 @@ export async function callClaude(systemPrompt, userMessage, { maxTokens = 16000,
   const t0 = Date.now();
   const response = await getClient().messages.create(params);
   const sec = ((Date.now() - t0) / 1000).toFixed(1);
+  const tokens = (response.usage?.input_tokens || 0) + (response.usage?.output_tokens || 0);
   log(`${chalk.cyan("Claude")} ${MODEL} · ${sec}s · in ${response.usage.input_tokens} / out ${response.usage.output_tokens} tokens`);
 
   if (response.stop_reason === "refusal") {
@@ -113,11 +118,11 @@ export async function callClaude(systemPrompt, userMessage, { maxTokens = 16000,
   }
 
   const textBlocks = response.content.filter((b) => b.type === "text");
-  if (schema) return JSON.parse(textBlocks[0].text);
-  return textBlocks.map((b) => b.text).join("\n");
+  const result = schema ? JSON.parse(textBlocks[0].text) : textBlocks.map((b) => b.text).join("\n");
+  return { result, tokens };
 }
 
-/* ---------- main flow ---------- */
+/* ---------- prompts / schema ---------- */
 const DB_SCHEMA = {
   type: "object",
   properties: {
@@ -141,24 +146,59 @@ Rules:
 - Add brief inline comments where they aid understanding.
 - "content" must contain ONLY the code — no markdown fences, no prose around it.`;
 
-export async function processRequest(request, { format = "sql" } = {}) {
+/* ---------- main flow ---------- */
+export async function processRequest(request, { format = "sql", resume = null } = {}) {
   requireEnv("ANTHROPIC_API_KEY");
   const fmt = OUTPUT_FORMATS[format];
   if (!fmt) fail(`--format утга буруу: "${format}" (зөв: ${Object.keys(OUTPUT_FORMATS).join(" | ")})`);
 
   log(`🗄  Starting DB Agent — "${request}" (${format})`);
 
-  // Step 1 — Claude schema/query-г зохионо
-  const result = await callClaude(buildSystem(fmt.label), request, { schema: DB_SCHEMA });
-  logStep(1, `${format.toUpperCase()} код бэлэн боллоо`);
+  let outPath = null;
+  let generated = null;
 
-  // Step 2 — файлд хадгална
-  await fse.ensureDir(OUTPUT_DIR);
-  const file = path.join(OUTPUT_DIR, `schema_${timestamp()}${fmt.ext}`);
-  await fse.writeFile(file, result.content.trimEnd() + "\n", "utf8");
-  logStep(2, "Файлд хадгаллаа");
-  if (result.notes) log(`📝 ${result.notes}`);
+  await runAgent({
+    agentType: "db-agent",
+    goal: `${request} [${format}]`,
+    log,
+    resume,
+    buildSteps: async () => [
+      {
+        action: "generate",
+        description: `Claude generates ${format.toUpperCase()}`,
+        run: async () => {
+          const { result, tokens } = await callClaude(buildSystem(fmt.label), request, { schema: DB_SCHEMA });
+          generated = result;
+          logStep(1, `${format.toUpperCase()} код бэлэн боллоо`);
+          if (result.notes) log(`📝 ${result.notes}`);
+          return {
+            result: `${format} schema бэлэн`,
+            tokens,
+            context: {
+              accumulated_knowledge: result.notes || `${format} generated`,
+              last_claude_response: (result.notes || "").slice(0, 300),
+              decisions_made: [`Output format: ${format}`],
+            },
+          };
+        },
+      },
+      {
+        action: "save",
+        description: "Save schema file to /output",
+        run: async (ctx) => {
+          await fse.ensureDir(OUTPUT_DIR);
+          const file = path.join(OUTPUT_DIR, `schema_${timestamp()}${fmt.ext}`);
+          const rel = path.relative(process.cwd(), file);
+          await fse.writeFile(file, generated.content.trimEnd() + "\n", "utf8");
+          outPath = file;
+          ctx.summary = `"${request}" — ${format} → ${path.basename(file)}`;
+          logStep(2, "Файлд хадгаллаа");
+          return { result: rel, context: { files_created: [rel] } };
+        },
+      },
+    ],
+  });
 
-  logDone(`Done — ${path.relative(process.cwd(), file)}`);
-  return file;
+  logDone(`Done — ${outPath ? path.relative(process.cwd(), outPath) : "(файл үүсээгүй)"}`);
+  return outPath;
 }

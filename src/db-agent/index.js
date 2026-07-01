@@ -19,12 +19,14 @@ const HELP = `
 
 Сонголтууд:
   --format  ${Object.keys(OUTPUT_FORMATS).join(" | ")}  (default: sql)
+  --resume <sessionId>   Тасарсан session-ийг үргэлжлүүлэх (crash recovery)
 
 Үр дүн: output/schema_YYYYMMDDHHmm.sql | .prisma | .ts
 Тэмдэглэл: DB_CONNECTION_STRING (.env) одоогоор зөвхөн нөөцөд — агент SQL-ийг
 бодит DB дээр ажиллуулдаггүй, файл л үүсгэнэ.
 
 Шаардлага: .env дотор ANTHROPIC_API_KEY
+           (санах ойд нэмэлтээр FIREBASE_DATABASE_URL, FIREBASE_SERVICE_ACCOUNT_PATH)
 `;
 
 const argv = process.argv.slice(2);
@@ -44,6 +46,7 @@ if (!request) {
 try {
   await processRequest(request, {
     format: typeof flags.format === "string" ? flags.format : undefined,
+    resume: typeof flags.resume === "string" ? flags.resume : null,
   });
 } catch (err) {
   handleError(err);

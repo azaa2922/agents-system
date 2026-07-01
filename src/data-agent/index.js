@@ -19,7 +19,11 @@ const HELP = `
 Дэмжих форматууд: CSV (papaparse), JSON (объектын массив)
 Үр дүн: output/analysis_YYYYMMDDHHmm.md — гол дүгнэлтүүд + ASCII chart/table
 
+Сонголт:
+  --resume <sessionId>   Тасарсан session-ийг үргэлжлүүлэх (crash recovery)
+
 Шаардлага: .env дотор ANTHROPIC_API_KEY
+           (санах ойд нэмэлтээр FIREBASE_DATABASE_URL, FIREBASE_SERVICE_ACCOUNT_PATH)
 `;
 
 const argv = process.argv.slice(2);
@@ -42,7 +46,9 @@ if (!file) {
 }
 
 try {
-  await processRequest(instruction, file);
+  await processRequest(instruction, file, {
+    resume: typeof flags.resume === "string" ? flags.resume : null,
+  });
 } catch (err) {
   handleError(err);
 }

@@ -19,7 +19,11 @@ const HELP = `
 Дэмжих форматууд: CSV, JSON, TXT, Markdown
 Үр дүн: output/<нэр>_YYYYMMDDHHmm.<өргөтгөл>
 
+Сонголт:
+  --resume <sessionId>   Тасарсан session-ийг үргэлжлүүлэх (crash recovery)
+
 Шаардлага: .env дотор ANTHROPIC_API_KEY
+           (санах ойд нэмэлтээр FIREBASE_DATABASE_URL, FIREBASE_SERVICE_ACCOUNT_PATH)
 `;
 
 const argv = process.argv.slice(2);
@@ -42,7 +46,9 @@ if (files.length === 0) {
 }
 
 try {
-  await processRequest(instruction, files);
+  await processRequest(instruction, files, {
+    resume: typeof flags.resume === "string" ? flags.resume : null,
+  });
 } catch (err) {
   handleError(err);
 }

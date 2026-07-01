@@ -3,6 +3,8 @@
 Claude API ашигладаг, тус бүрдээ бие даан ажиллах чадвартай **6 CLI агент** бүхий Node.js monorepo.
 Бүх агент `@anthropic-ai/sdk`-ээр `claude-opus-4-8` загварыг дууддаг бөгөөд үр дүнгээ `/output` хавтсанд timestamp-тай нэрээр хадгална.
 
+Агентууд **Firebase Realtime Database** дээр суурилсан хуваалцсан санах ойтой: ажлаа алхам алхмаар бүртгэж, олж мэдсэн зүйлээ context-д хуримтлуулж, тасарсан session-ээ үргэлжлүүлж чадна. Firebase тохируулаагүй бол санах ойгүйгээр хэвийн ажиллана.
+
 ## 📁 Бүтэц
 
 ```
@@ -12,6 +14,10 @@ agents-system/
 ├── README.md
 ├── output/               # бүх агентын үр дүн энд хадгалагдана
 └── src/
+    ├── core/             # 🧠 хуваалцсан модулиуд
+    │   ├── memory.js       # Firebase Realtime Database санах ой
+    │   ├── runner.js       # алхмын гүйцэтгэл + session-ий амьдралын мөчлөг
+    │   └── test-memory.js  # санах ойн тест
     ├── search-agent/     # 🔎 вэб хайлт (Tavily)
     ├── file-agent/       # 📂 файл хувиргалт
     ├── code-agent/       # 🛠  код үүсгэгч
@@ -36,8 +42,59 @@ cp .env.example .env
 |---|---|
 | `ANTHROPIC_API_KEY` | Бүх агентад заавал — [platform.claude.com](https://platform.claude.com) |
 | `TAVILY_API_KEY` | Search Agent-д заавал — [tavily.com](https://tavily.com) |
+| `FIREBASE_DATABASE_URL`, `FIREBASE_SERVICE_ACCOUNT_PATH` | Санах ойд (заавал биш — доор үзнэ үү) |
 | `GITHUB_TOKEN`, `GIT_REMOTE_URL` | Code Agent-ийн `--push` сонголтод (заавал биш) |
 | `DB_CONNECTION_STRING` | DB Agent-д нөөцөлсөн (одоогоор файл л үүсгэнэ) |
+
+## 🧠 Санах ой (Firebase Realtime Database) — сонголтоор
+
+Firebase тохируулбал агент бүр өөрийн session-ийг `/agents` дор, дуусгасан ажлаа `/agent_history` дор бүртгэнэ. Алхам бүрийн статус, үргэлжлэх хугацаа, токены зарцуулалт болон агентын **хуримтлуулсан context** (олж мэдсэн зүйл, үүсгэсэн файл, гаргасан шийдвэрүүд) хадгалагдана. Энэ нь агентад «санах ой» өгч, `--resume <sessionId>`-ээр тасарсан ажлаа үргэлжлүүлэх (crash recovery) боломж олгоно.
+
+**Тохируулаагүй бол** агентууд `⚠️ Firebase not configured — running without memory` гэж бичээд санах ойгүйгээр хэвийн ажиллана.
+
+### Тохируулах алхмууд
+
+1. [Firebase Console](https://console.firebase.google.com) руу орно
+2. Шинэ project үүсгэнэ
+3. **Realtime Database**-ийг идэвхжүүлнэ (Build → Realtime Database → Create Database)
+4. **Project Settings → Service Accounts → Generate New Private Key** дарж JSON татна
+5. Уг файлыг project-ийн үндэс дор `firebase-service-account.json` нэрээр хадгална
+   (⚠️ энэ файл нууц — `.gitignore`-д орсон, git-д хэзээ ч бүү commit хий)
+6. Database URL-ээ `.env` дотор хуулна:
+   ```
+   FIREBASE_DATABASE_URL=https://your-project-default-rtdb.firebaseio.com
+   FIREBASE_SERVICE_ACCOUNT_PATH=./firebase-service-account.json
+   ```
+
+### Санах ойн бүтэц
+
+```
+/agents/agent_session_<UUID>
+  ├── id, created_at, goal, agent_type
+  ├── status: running | completed | failed | paused
+  ├── current_step, total_steps
+  ├── steps[]     — { index, action, description, status, started_at,
+  │                   completed_at, result, error, duration_ms, tokens_used }
+  ├── context     — { accumulated_knowledge, files_created[],
+  │                   decisions_made[], last_claude_response }
+  └── metadata    — { total_tokens, total_api_calls, total_duration_ms, errors_count }
+
+/agent_history/history_<UUID>
+  └── { agent_id, agent_type, goal, status, completed_at, summary }
+```
+
+### Санах ойн тест
+
+Firebase зөв ажиллаж буйг шалгах:
+
+```bash
+npm run test:memory          # эсвэл: node src/core/test-memory.js
+```
+
+Тест нь context нэгтгэх логикийг офлайн шалгаад, Firebase тохируулсан үед session
+үүсгэх → 3 алхам → context хуримтлуулах → дуусгах → жагсаах → сэргээх бүх урсгалыг
+шалгана. Бүгд амжилттай бол `✅ Memory system working!` гэж хэвлэнэ.
+(Firebase тохируулаагүй бол офлайн шалгалтыг хийгээд integration хэсгийг алгасна.)
 
 ## 🤖 Агентууд — товч хүснэгт
 
@@ -155,10 +212,13 @@ npm run db     -- "users table schema" --format prisma
 - **ES Modules** (`"type": "module"`), Node.js 18+
 - Бүх лог `[HH:MM:SS]` timestamp + алхмын дугаар + emoji-тэй
 - Claude API дуудлага бүрийн **хугацаа, токены тоо** логлогдоно
-- Алдааг улаанаар хэвлэж `exit 1` (амжилттай бол `exit 0`)
+- Firebase бичилт бүр `💾 Firebase: …`, context шинэчлэлт `🧠 Context updated: …` гэж логлогдоно
+- Санах ой (Firebase) **сонголтоор** — тохируулаагүй бол агент хэвийн ажиллана
+- Тасарсан ажлыг `--resume <sessionId>`-ээр үргэлжлүүлнэ (crash recovery)
+- Алдааг улаанаар хэвлэж `exit 1` (амжилттай бол `exit 0`); Firebase-ийн алдаа агентыг унагадаггүй
 - Бүх үр дүнгийн файлын нэрэнд `YYYYMMDDHHmm` timestamp орно
 - Хоосон/олдоогүй файл, буруу флагийг ойлгомжтой мессежээр зогсооно
 
 ## 📦 Shared dependencies
 
-`@anthropic-ai/sdk` · `axios` · `dotenv` · `papaparse` · `csv-parse` · `fs-extra` · `chalk`
+`@anthropic-ai/sdk` · `axios` · `dotenv` · `papaparse` · `csv-parse` · `fs-extra` · `chalk` · `firebase-admin`

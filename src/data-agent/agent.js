@@ -1,6 +1,9 @@
 /**
  * Data Agent — CSV/JSON өгөгдлийг уншиж, Claude-оор шинжилгээ хийлгээд
  * ASCII chart бүхий Markdown тайланг /output руу хадгална.
+ *
+ * Санах ой: load → analyze → save алхмуудаар явж, алхам бүр Firebase-д
+ * бүртгэгдэнэ. Firebase тохируулаагүй бол санах ойгүйгээр адил ажиллана.
  */
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,6 +12,7 @@ import chalk from "chalk";
 import Anthropic from "@anthropic-ai/sdk";
 import fse from "fs-extra";
 import Papa from "papaparse";
+import { runAgent } from "../core/runner.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const ROOT = path.resolve(__dirname, "..", "..");
@@ -99,6 +103,7 @@ export async function callClaude(systemPrompt, userMessage, { maxTokens = 16000,
   const t0 = Date.now();
   const response = await getClient().messages.create(params);
   const sec = ((Date.now() - t0) / 1000).toFixed(1);
+  const tokens = (response.usage?.input_tokens || 0) + (response.usage?.output_tokens || 0);
   log(`${chalk.cyan("Claude")} ${MODEL} · ${sec}s · in ${response.usage.input_tokens} / out ${response.usage.output_tokens} tokens`);
 
   if (response.stop_reason === "refusal") {
@@ -109,11 +114,11 @@ export async function callClaude(systemPrompt, userMessage, { maxTokens = 16000,
   }
 
   const textBlocks = response.content.filter((b) => b.type === "text");
-  if (schema) return JSON.parse(textBlocks[0].text);
-  return textBlocks.map((b) => b.text).join("\n");
+  const result = schema ? JSON.parse(textBlocks[0].text) : textBlocks.map((b) => b.text).join("\n");
+  return { result, tokens };
 }
 
-/* ---------- main flow ---------- */
+/* ---------- data helpers ---------- */
 const SYSTEM = `You are a data-analysis agent. You receive a dataset profile, a sample of rows and an instruction.
 Write a clear analysis report in Markdown that:
 - answers the instruction directly,
@@ -143,9 +148,7 @@ function profileData(rows) {
   const columns = rows.length ? Object.keys(rows[0]) : [];
   const numeric = {};
   for (const col of columns) {
-    const values = rows
-      .map((r) => r[col])
-      .filter((v) => typeof v === "number" && Number.isFinite(v));
+    const values = rows.map((r) => r[col]).filter((v) => typeof v === "number" && Number.isFinite(v));
     if (values.length === 0 || values.length < rows.length / 2) continue;
     let min = Infinity;
     let max = -Infinity;
@@ -166,58 +169,98 @@ function profileData(rows) {
   return { rows: rows.length, columns, numeric };
 }
 
-export async function processRequest(instruction, filePath) {
+/* ---------- main flow ---------- */
+export async function processRequest(instruction, filePath, { resume = null } = {}) {
   requireEnv("ANTHROPIC_API_KEY");
   log(`📊 Starting Data Agent — "${instruction}"`);
 
-  // Step 1 — өгөгдлийг унших, профайл гаргах
-  const full = path.resolve(process.cwd(), filePath);
-  const text = await fse.readFile(full, "utf8");
-  if (!text.trim()) fail(`${filePath} файл хоосон байна`);
-  const rows = loadData(full, text);
-  if (rows.length === 0) fail("Өгөгдлийн мөр олдсонгүй");
-  const profile = profileData(rows);
-  logStep(1, `Уншлаа: ${filePath} — ${profile.rows} мөр, ${profile.columns.length} багана (${profile.columns.join(", ")})`);
+  let outPath = null;
+  let profile = null;
+  let sample = null;
+  let sampled = false;
+  let report = "";
 
-  // Step 2 — Claude-д өгөх дээж бэлтгэх
-  const sample = rows.slice(0, SAMPLE_ROWS);
-  const sampled = rows.length > SAMPLE_ROWS;
-  if (sampled) {
-    log(chalk.yellow(`⚠ Том өгөгдөл: эхний ${SAMPLE_ROWS} мөрийг дээж болгож, бүрэн профайлын хамт илгээнэ`));
-  }
-  logStep(2, `Дээж бэлэн — ${sample.length} мөр + тоон баганын статистик`);
+  await runAgent({
+    agentType: "data-agent",
+    goal: `${instruction} [${filePath}]`,
+    log,
+    resume,
+    buildSteps: async () => [
+      {
+        action: "load",
+        description: `Load & profile ${path.basename(filePath)}`,
+        run: async () => {
+          const full = path.resolve(process.cwd(), filePath);
+          const text = await fse.readFile(full, "utf8");
+          if (!text.trim()) fail(`${filePath} файл хоосон байна`);
+          const rows = loadData(full, text);
+          if (rows.length === 0) fail("Өгөгдлийн мөр олдсонгүй");
+          profile = profileData(rows);
+          sample = rows.slice(0, SAMPLE_ROWS);
+          sampled = rows.length > SAMPLE_ROWS;
+          logStep(1, `Уншлаа: ${filePath} — ${profile.rows} мөр, ${profile.columns.length} багана (${profile.columns.join(", ")})`);
+          if (sampled) {
+            log(chalk.yellow(`⚠ Том өгөгдөл: эхний ${SAMPLE_ROWS} мөрийг дээж болгож, бүрэн профайлын хамт илгээнэ`));
+          }
+          return {
+            result: `${profile.rows} мөр × ${profile.columns.length} багана`,
+            context: {
+              decisions_made: [`Profiled ${profile.rows} rows, cols: ${profile.columns.join(", ")}`],
+              accumulated_knowledge: `Dataset: ${profile.rows} rows, numeric cols: ${Object.keys(profile.numeric).join(", ") || "none"}`,
+            },
+          };
+        },
+      },
+      {
+        action: "analyze",
+        description: "Claude analyses patterns & builds ASCII charts",
+        run: async () => {
+          const userMsg = [
+            `Instruction: ${instruction}`,
+            `Dataset file: ${path.basename(filePath)}`,
+            `Profile (computed over ALL ${profile.rows} rows):`,
+            JSON.stringify(profile, null, 2),
+            sampled ? `Sample (first ${SAMPLE_ROWS} of ${profile.rows} rows):` : `All rows (${profile.rows}):`,
+            JSON.stringify(sample, null, 2),
+          ].join("\n\n");
+          const { result, tokens } = await callClaude(SYSTEM, userMsg);
+          report = result;
+          logStep(2, "Claude шинжилгээ, ASCII chart бүхий тайлан бичлээ");
+          return {
+            result: `Тайлан бэлэн (${result.length} тэмдэгт)`,
+            tokens,
+            context: { last_claude_response: result.slice(0, 500) },
+          };
+        },
+      },
+      {
+        action: "save",
+        description: "Save report to /output",
+        run: async (ctx) => {
+          await fse.ensureDir(OUTPUT_DIR);
+          const file = path.join(OUTPUT_DIR, `analysis_${timestamp()}.md`);
+          const rel = path.relative(process.cwd(), file);
+          const doc = [
+            "# Data Analysis Report",
+            "",
+            `- **Хүсэлт:** ${instruction}`,
+            `- **Файл:** ${path.basename(filePath)}`,
+            `- **Огноо:** ${new Date().toISOString()}`,
+            `- **Хэмжээ:** ${profile.rows} мөр × ${profile.columns.length} багана${sampled ? ` (Claude-д эхний ${SAMPLE_ROWS} мөрийн дээж + бүрэн статистик өгсөн)` : ""}`,
+            "",
+            report,
+            "",
+          ].join("\n");
+          await fse.writeFile(file, doc, "utf8");
+          outPath = file;
+          ctx.summary = `"${instruction}" — ${profile.rows} мөр шинжилж ${path.basename(file)}-д хадгалав`;
+          logStep(3, "Тайланг файлд хадгаллаа");
+          return { result: rel, context: { files_created: [rel] } };
+        },
+      },
+    ],
+  });
 
-  // Step 3 — Claude шинжилгээ хийнэ
-  const userMsg = [
-    `Instruction: ${instruction}`,
-    `Dataset file: ${path.basename(full)}`,
-    `Profile (computed over ALL ${profile.rows} rows):`,
-    JSON.stringify(profile, null, 2),
-    sampled
-      ? `Sample (first ${SAMPLE_ROWS} of ${rows.length} rows):`
-      : `All rows (${rows.length}):`,
-    JSON.stringify(sample, null, 2),
-  ].join("\n\n");
-  const report = await callClaude(SYSTEM, userMsg);
-  logStep(3, "Claude шинжилгээ, ASCII chart бүхий тайлан бичлээ");
-
-  // Step 4 — тайланг хадгалах
-  await fse.ensureDir(OUTPUT_DIR);
-  const file = path.join(OUTPUT_DIR, `analysis_${timestamp()}.md`);
-  const doc = [
-    "# Data Analysis Report",
-    "",
-    `- **Хүсэлт:** ${instruction}`,
-    `- **Файл:** ${path.basename(full)}`,
-    `- **Огноо:** ${new Date().toISOString()}`,
-    `- **Хэмжээ:** ${profile.rows} мөр × ${profile.columns.length} багана${sampled ? ` (Claude-д эхний ${SAMPLE_ROWS} мөрийн дээж + бүрэн статистик өгсөн)` : ""}`,
-    "",
-    report,
-    "",
-  ].join("\n");
-  await fse.writeFile(file, doc, "utf8");
-  logStep(4, "Тайланг файлд хадгаллаа");
-
-  logDone(`Done — ${path.relative(process.cwd(), file)}`);
-  return file;
+  logDone(`Done — ${outPath ? path.relative(process.cwd(), outPath) : "(файл үүсээгүй)"}`);
+  return outPath;
 }

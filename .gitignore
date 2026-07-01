@@ -145,3 +145,8 @@ vite.config.ts.timestamp-*
 # Agent outputs (generated results stay local)
 output/*
 !output/.gitkeep
+
+# Firebase service account private key — NEVER commit
+firebase-service-account.json
+*-service-account.json
+*serviceAccount*.json

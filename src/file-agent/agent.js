@@ -1,6 +1,9 @@
 /**
  * File Agent — файлуудыг уншиж, Claude-оор хувиргаад (CSV↔JSON, markdown
  * heading задлах, JSON нэгтгэх г.м.) үр дүнг /output руу хадгална.
+ *
+ * Санах ой: load → transform → save алхмуудаар явж, алхам бүр Firebase-д
+ * бүртгэгдэнэ. Firebase тохируулаагүй бол санах ойгүйгээр адил ажиллана.
  */
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,6 +12,7 @@ import chalk from "chalk";
 import Anthropic from "@anthropic-ai/sdk";
 import fse from "fs-extra";
 import { parse as parseCsv } from "csv-parse/sync";
+import { runAgent } from "../core/runner.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const ROOT = path.resolve(__dirname, "..", "..");
@@ -99,6 +103,7 @@ export async function callClaude(systemPrompt, userMessage, { maxTokens = 16000,
   const t0 = Date.now();
   const response = await getClient().messages.create(params);
   const sec = ((Date.now() - t0) / 1000).toFixed(1);
+  const tokens = (response.usage?.input_tokens || 0) + (response.usage?.output_tokens || 0);
   log(`${chalk.cyan("Claude")} ${MODEL} · ${sec}s · in ${response.usage.input_tokens} / out ${response.usage.output_tokens} tokens`);
 
   if (response.stop_reason === "refusal") {
@@ -109,11 +114,11 @@ export async function callClaude(systemPrompt, userMessage, { maxTokens = 16000,
   }
 
   const textBlocks = response.content.filter((b) => b.type === "text");
-  if (schema) return JSON.parse(textBlocks[0].text);
-  return textBlocks.map((b) => b.text).join("\n");
+  const result = schema ? JSON.parse(textBlocks[0].text) : textBlocks.map((b) => b.text).join("\n");
+  return { result, tokens };
 }
 
-/* ---------- main flow ---------- */
+/* ---------- prompts / schema ---------- */
 const TRANSFORM_SCHEMA = {
   type: "object",
   properties: {
@@ -157,47 +162,89 @@ function describeFile(filePath, text) {
   return "Текст";
 }
 
-export async function processRequest(instruction, files) {
+/* ---------- main flow ---------- */
+export async function processRequest(instruction, files, { resume = null } = {}) {
   requireEnv("ANTHROPIC_API_KEY");
   log(`📂 Starting File Agent — "${instruction}"`);
 
-  // Step 1 — файлуудыг унших
+  let outPath = null;
   const loaded = [];
-  for (const f of files) {
-    const full = path.resolve(process.cwd(), f);
-    const text = await fse.readFile(full, "utf8");
-    if (!text.trim()) fail(`${f} файл хоосон байна`);
-    let info;
-    try {
-      info = describeFile(full, text);
-    } catch (e) {
-      fail(`${f} файлыг задлахад алдаа гарлаа: ${e.message}`);
-    }
-    loaded.push({ name: path.basename(full), text, info });
-    logStep(1, `Уншлаа: ${f} (${info})`);
-  }
-  const totalChars = loaded.reduce((s, f) => s + f.text.length, 0);
-  if (totalChars > MAX_INPUT_CHARS) {
-    fail(`Оролтын файлууд хэт том байна (${totalChars} тэмдэгт > ${MAX_INPUT_CHARS}). Файлаа хувааж өгнө үү.`);
-  }
+  let transformed = null;
 
-  // Step 2 — Claude хувиргалтын алхмуудыг шийдэж гүйцэтгэнэ
-  const userMsg = [
-    `Instruction: ${instruction}`,
-    ...loaded.map((f, i) => `--- FILE ${i + 1}: ${f.name} (${f.info}) ---\n${f.text}`),
-  ].join("\n\n");
-  const result = await callClaude(SYSTEM, userMsg, { schema: TRANSFORM_SCHEMA });
-  logStep(2, `Хувиргалт дууслаа — ${result.explanation}`);
+  await runAgent({
+    agentType: "file-agent",
+    goal: `${instruction} [${files.join(", ")}]`,
+    log,
+    resume,
+    buildSteps: async () => [
+      {
+        action: "load",
+        description: `Read ${files.length} file(s)`,
+        run: async () => {
+          for (const f of files) {
+            const full = path.resolve(process.cwd(), f);
+            const text = await fse.readFile(full, "utf8");
+            if (!text.trim()) fail(`${f} файл хоосон байна`);
+            let info;
+            try {
+              info = describeFile(full, text);
+            } catch (e) {
+              fail(`${f} файлыг задлахад алдаа гарлаа: ${e.message}`);
+            }
+            loaded.push({ name: path.basename(full), text, info });
+            logStep(1, `Уншлаа: ${f} (${info})`);
+          }
+          const totalChars = loaded.reduce((s, f) => s + f.text.length, 0);
+          if (totalChars > MAX_INPUT_CHARS) {
+            fail(`Оролтын файлууд хэт том байна (${totalChars} тэмдэгт > ${MAX_INPUT_CHARS}). Файлаа хувааж өгнө үү.`);
+          }
+          return {
+            result: `${loaded.length} файл, ${totalChars} тэмдэгт`,
+            context: { decisions_made: [`Loaded ${loaded.length} file(s): ${loaded.map((l) => l.name).join(", ")}`] },
+          };
+        },
+      },
+      {
+        action: "transform",
+        description: "Claude decides & applies the transformation",
+        run: async () => {
+          const userMsg = [
+            `Instruction: ${instruction}`,
+            ...loaded.map((f, i) => `--- FILE ${i + 1}: ${f.name} (${f.info}) ---\n${f.text}`),
+          ].join("\n\n");
+          const { result, tokens } = await callClaude(SYSTEM, userMsg, { schema: TRANSFORM_SCHEMA });
+          transformed = result;
+          logStep(2, `Хувиргалт дууслаа — ${result.explanation}`);
+          return {
+            result: result.explanation,
+            tokens,
+            context: {
+              accumulated_knowledge: result.explanation,
+              last_claude_response: `→ ${result.output_filename}`,
+            },
+          };
+        },
+      },
+      {
+        action: "save",
+        description: "Write transformed file to /output",
+        run: async (ctx) => {
+          await fse.ensureDir(OUTPUT_DIR);
+          const safe = path.basename(transformed.output_filename).replace(/[^\w.\-]/g, "_");
+          const ext = path.extname(safe);
+          const base = safe.slice(0, safe.length - ext.length) || "output";
+          const out = path.join(OUTPUT_DIR, `${base}_${timestamp()}${ext || ".txt"}`);
+          await fse.writeFile(out, transformed.output_content, "utf8");
+          outPath = out;
+          const rel = path.relative(process.cwd(), out);
+          ctx.summary = `${transformed.explanation} → ${path.basename(out)}`;
+          logStep(3, "Үр дүнг файлд хадгаллаа");
+          return { result: rel, context: { files_created: [rel] } };
+        },
+      },
+    ],
+  });
 
-  // Step 3 — timestamp-тай нэрээр хадгалах
-  await fse.ensureDir(OUTPUT_DIR);
-  const safe = path.basename(result.output_filename).replace(/[^\w.\-]/g, "_");
-  const ext = path.extname(safe);
-  const base = safe.slice(0, safe.length - ext.length) || "output";
-  const outPath = path.join(OUTPUT_DIR, `${base}_${timestamp()}${ext || ".txt"}`);
-  await fse.writeFile(outPath, result.output_content, "utf8");
-  logStep(3, "Үр дүнг файлд хадгаллаа");
-
-  logDone(`Done — ${path.relative(process.cwd(), outPath)}`);
+  logDone(`Done — ${outPath ? path.relative(process.cwd(), outPath) : "(файл үүсээгүй)"}`);
   return outPath;
 }

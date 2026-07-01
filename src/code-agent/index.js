@@ -17,13 +17,15 @@ const HELP = `
   node src/code-agent/index.js "generate HTML/CSS landing page" --git
 
 Сонголтууд:
-  --name <нэр>   Төслийн хавтасны нэрийг гараар өгөх
-  --git          Үүсгэсэн төсөл дотор git init + commit хийх
-  --push         Дээрх + GIT_REMOTE_URL (.env) руу push хийх
+  --name <нэр>           Төслийн хавтасны нэрийг гараар өгөх
+  --git                  Үүсгэсэн төсөл дотор git init + commit хийх
+  --push                 Дээрх + GIT_REMOTE_URL (.env) руу push хийх
+  --resume <sessionId>   Тасарсан session-ийг үргэлжлүүлэх (crash recovery)
 
 Үр дүн: output/PROJECT_NAME/ — бүх эх файл + README.md
 
 Шаардлага: .env дотор ANTHROPIC_API_KEY (push-д GIT_REMOTE_URL)
+           (санах ойд нэмэлтээр FIREBASE_DATABASE_URL, FIREBASE_SERVICE_ACCOUNT_PATH)
 `;
 
 const argv = process.argv.slice(2);
@@ -45,6 +47,7 @@ try {
     name: typeof flags.name === "string" ? flags.name : undefined,
     useGit: Boolean(flags.git),
     push: Boolean(flags.push),
+    resume: typeof flags.resume === "string" ? flags.resume : null,
   });
 } catch (err) {
   handleError(err);

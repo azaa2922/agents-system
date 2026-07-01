@@ -3,25 +3,30 @@
  * Search Agent CLI
  *   node src/search-agent/index.js "search for best React libraries"
  */
-import { processRequest, handleError, fail } from "./agent.js";
+import { processRequest, handleError, fail, parseArgs } from "./agent.js";
 
 const HELP = `
 🔎 Search Agent — Claude + Tavily вэб хайлт
 
 Хэрэглээ:
-  node src/search-agent/index.js "<хайх зүйл>"
+  node src/search-agent/index.js "<хайх зүйл>" [--resume <sessionId>]
 
 Жишээ:
   node src/search-agent/index.js "search for best React libraries"
   node src/search-agent/index.js "2026 оны JavaScript framework-үүдийн харьцуулалт"
 
-Урсгал:
-  1. Claude хайлтын стратеги, query-нүүдийг төлөвлөнө
-  2. Tavily API-аар хайлтуудыг гүйцэтгэнэ
-  3. Claude үр дүнг нэгтгэж дүгнэлт бичнэ
-  4. output/search_YYYYMMDDHHmm.md файлд хадгална
+Урсгал (санах ойтой):
+  1. Session үүсгэнэ (Firebase тохируулсан бол)
+  2. Claude хайлтын стратеги, query-нүүдийг төлөвлөнө
+  3. Tavily API-аар хайлт бүрийг гүйцэтгэнэ (олдвор нь context-д хуримтлагдана)
+  4. Claude үр дүнг нэгтгэж дүгнэлт бичнэ
+  5. output/search_YYYYMMDDHHmm.md файлд хадгална
+
+Сонголт:
+  --resume <sessionId>   Тасарсан session-ийг үргэлжлүүлэх (crash recovery)
 
 Шаардлага: .env дотор ANTHROPIC_API_KEY, TAVILY_API_KEY
+           (санах ойд нэмэлтээр FIREBASE_DATABASE_URL, FIREBASE_SERVICE_ACCOUNT_PATH)
 `;
 
 const argv = process.argv.slice(2);
@@ -30,14 +35,15 @@ if (argv.includes("--help") || argv.includes("-h")) {
   process.exit(0);
 }
 
-const query = argv.filter((a) => !a.startsWith("-")).join(" ").trim();
+const { positional, flags } = parseArgs(argv);
+const query = positional.join(" ").trim();
 if (!query) {
   console.log(HELP);
   fail("Хайлтын хүсэлтээ өгнө үү");
 }
 
 try {
-  await processRequest(query);
+  await processRequest(query, { resume: typeof flags.resume === "string" ? flags.resume : null });
 } catch (err) {
   handleError(err);
 }
