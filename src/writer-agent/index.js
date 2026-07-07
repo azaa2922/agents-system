@@ -1,29 +1,32 @@
 #!/usr/bin/env node
 /**
- * Writer Agent CLI
+ * Writer Agent CLI — autonomous agentic loop
  *   node src/writer-agent/index.js "write a blog post about AI" --tone professional --length medium
  */
-import { processRequest, handleError, fail, parseArgs, TONES, LENGTHS, FORMATS } from "./agent.js";
+import { handleError, fail, parseArgs, requireEnv, TONES, LENGTHS, FORMATS } from "./agent.js";
+import { createToolRegistry } from "./tool-registry.js";
+import { runAgenticAgent, loopFlags } from "../core/run-agent.js";
 
 const HELP = `
-✍️  Writer Agent — Claude-оор контент бичигч
+✍️  Writer Agent — Claude-оор контент бичигч (agentic loop)
 
 Хэрэглээ:
-  node src/writer-agent/index.js "<сэдэв/заавар>" [--tone ...] [--length ...] [--format ...]
+  node src/writer-agent/index.js "<сэдэв/заавар>" [--tone ...] [--length ...] [--format ...] [--max-iterations N] [--resume <sessionId>]
 
 Жишээ:
   node src/writer-agent/index.js "write a 500-word blog post about AI" --tone professional
-  node src/writer-agent/index.js "write a technical tutorial on Node.js streams" --format docs --length long
   node src/writer-agent/index.js "write 5 social media posts about Web3" --format social --tone casual
 
 Сонголтууд:
   --tone    ${TONES.join(" | ")}  (default: professional)
-  --length  ${Object.keys(LENGTHS).join(" | ")}  (short ≈200, medium ≈500, long 1000+ үг; default: medium)
+  --length  ${Object.keys(LENGTHS).join(" | ")}  (default: medium)
   --format  ${FORMATS.join(" | ")}  (default: blog)
 
-Үр дүн: output/content_YYYYMMDDHHmm.md — YAML frontmatter (title, date, format, tone, length)
+Tools: write (Claude контент → output/), file, think
 
+Үр дүн: output/content_YYYYMMDDHHmm.md — YAML frontmatter-тэй
 Шаардлага: .env дотор ANTHROPIC_API_KEY
+Сонголтоор: FIREBASE_DATABASE_URL + FIREBASE_SERVICE_ACCOUNT_PATH (session тракинг)
 `;
 
 const argv = process.argv.slice(2);
@@ -41,10 +44,17 @@ if (!brief) {
 }
 
 try {
-  await processRequest(brief, {
-    tone: typeof flags.tone === "string" ? flags.tone : undefined,
-    length: typeof flags.length === "string" ? flags.length : undefined,
-    format: typeof flags.format === "string" ? flags.format : undefined,
+  requireEnv("ANTHROPIC_API_KEY");
+  await runAgenticAgent({
+    agentType: "writer-agent",
+    label: "WRITER AGENT",
+    goal: brief,
+    toolRegistry: createToolRegistry({
+      tone: typeof flags.tone === "string" ? flags.tone : undefined,
+      length: typeof flags.length === "string" ? flags.length : undefined,
+      format: typeof flags.format === "string" ? flags.format : undefined,
+    }),
+    ...loopFlags(flags),
   });
 } catch (err) {
   handleError(err);

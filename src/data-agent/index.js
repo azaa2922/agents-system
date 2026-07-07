@@ -1,25 +1,28 @@
 #!/usr/bin/env node
 /**
- * Data Agent CLI
+ * Data Agent CLI — autonomous agentic loop
  *   node src/data-agent/index.js "analyze sales.csv and find trends" --file sales.csv
  */
-import { processRequest, handleError, fail, parseArgs } from "./agent.js";
+import { handleError, fail, parseArgs, requireEnv } from "./agent.js";
+import { createToolRegistry } from "./tool-registry.js";
+import { runAgenticAgent, loopFlags } from "../core/run-agent.js";
 
 const HELP = `
-📊 Data Agent — Claude-оор өгөгдлийн шинжилгээ
+📊 Data Agent — Claude-оор өгөгдлийн шинжилгээ (agentic loop)
 
 Хэрэглээ:
-  node src/data-agent/index.js "<заавар>" --file <зам>
+  node src/data-agent/index.js "<заавар>" --file <зам> [--max-iterations N] [--resume <sessionId>]
 
 Жишээ:
   node src/data-agent/index.js "analyze sales data and find trends" --file sales.csv
   node src/data-agent/index.js "find top 10 products by revenue" --file products.csv
-  node src/data-agent/index.js "compare Q1 vs Q2 performance" --file quarters.json
 
+Tools: data (CSV/JSON шинжилгээ), file, write (тайлан → output/), think
 Дэмжих форматууд: CSV (papaparse), JSON (объектын массив)
-Үр дүн: output/analysis_YYYYMMDDHHmm.md — гол дүгнэлтүүд + ASCII chart/table
 
+Үр дүн: output/analysis_YYYYMMDDHHmm.md
 Шаардлага: .env дотор ANTHROPIC_API_KEY
+Сонголтоор: FIREBASE_DATABASE_URL + FIREBASE_SERVICE_ACCOUNT_PATH (session тракинг)
 `;
 
 const argv = process.argv.slice(2);
@@ -42,7 +45,14 @@ if (!file) {
 }
 
 try {
-  await processRequest(instruction, file);
+  requireEnv("ANTHROPIC_API_KEY");
+  await runAgenticAgent({
+    agentType: "data-agent",
+    label: "DATA AGENT",
+    goal: `${instruction} (data file: ${file})`,
+    toolRegistry: createToolRegistry(),
+    ...loopFlags(flags),
+  });
 } catch (err) {
   handleError(err);
 }

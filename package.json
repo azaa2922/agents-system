@@ -13,7 +13,10 @@
     "code": "node src/code-agent/index.js",
     "data": "node src/data-agent/index.js",
     "write": "node src/writer-agent/index.js",
-    "db": "node src/db-agent/index.js"
+    "db": "node src/db-agent/index.js",
+    "test": "node test-agentic-loop.js",
+    "test:agentic": "node test-agentic-loop.js",
+    "test:setup": "node test-agentic-setup.js"
   },
   "keywords": [
     "claude",
@@ -31,5 +34,8 @@
     "dotenv": "^17.4.2",
     "fs-extra": "^11.3.5",
     "papaparse": "^5.5.3"
+  },
+  "optionalDependencies": {
+    "firebase-admin": "^13.0.0"
   }
 }

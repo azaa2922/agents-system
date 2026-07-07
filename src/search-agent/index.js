@@ -1,27 +1,32 @@
 #!/usr/bin/env node
 /**
- * Search Agent CLI
+ * Search Agent CLI — autonomous agentic loop
  *   node src/search-agent/index.js "search for best React libraries"
+ *
+ * Урсгал (plan → execute → reflect, зорилго биелтэл давтана):
+ *   1. AgenticLoop дараагийн 1-3 алхмаа төлөвлөнө
+ *   2. toolRegistry-гийн tool-уудыг ажиллуулна (search / think / write)
+ *   3. Үр дүнг эргэцүүлж, дуусаагүй бол дахин давтана
+ *   4. Session бүр Firebase RTDB-д хадгалагдана (тохируулсан үед)
  */
-import { processRequest, handleError, fail } from "./agent.js";
+import { handleError, fail, requireEnv } from "./agent.js";
+import { createToolRegistry } from "./tool-registry.js";
+import { runAgenticAgent, loopFlags } from "../core/run-agent.js";
 
 const HELP = `
-🔎 Search Agent — Claude + Tavily вэб хайлт
+🔎 Search Agent — autonomous Claude + Tavily вэб хайлт (agentic loop)
 
 Хэрэглээ:
-  node src/search-agent/index.js "<хайх зүйл>"
+  node src/search-agent/index.js "<хайх зүйл>" [--max-iterations N] [--resume <sessionId>]
 
 Жишээ:
-  node src/search-agent/index.js "search for best React libraries"
+  node src/search-agent/index.js "Find React frameworks and compare them"
   node src/search-agent/index.js "2026 оны JavaScript framework-үүдийн харьцуулалт"
 
-Урсгал:
-  1. Claude хайлтын стратеги, query-нүүдийг төлөвлөнө
-  2. Tavily API-аар хайлтуудыг гүйцэтгэнэ
-  3. Claude үр дүнг нэгтгэж дүгнэлт бичнэ
-  4. output/search_YYYYMMDDHHmm.md файлд хадгална
+Tools: search (Tavily), think (Claude дүгнэлт), write (output/ руу тайлан)
 
 Шаардлага: .env дотор ANTHROPIC_API_KEY, TAVILY_API_KEY
+Сонголтоор: FIREBASE_DATABASE_URL + FIREBASE_SERVICE_ACCOUNT_PATH (session тракинг)
 `;
 
 const argv = process.argv.slice(2);
@@ -30,14 +35,34 @@ if (argv.includes("--help") || argv.includes("-h")) {
   process.exit(0);
 }
 
-const query = argv.filter((a) => !a.startsWith("-")).join(" ").trim();
-if (!query) {
+function takeOption(name) {
+  const i = argv.indexOf(name);
+  if (i === -1) return undefined;
+  const value = argv[i + 1];
+  argv.splice(i, 2);
+  return value;
+}
+
+const flags = {
+  "max-iterations": takeOption("--max-iterations"),
+  resume: takeOption("--resume"),
+};
+
+const goal = argv.filter((a) => !a.startsWith("-")).join(" ").trim();
+if (!goal) {
   console.log(HELP);
-  fail("Хайлтын хүсэлтээ өгнө үү");
+  fail("Хайлтын зорилгоо өгнө үү");
 }
 
 try {
-  await processRequest(query);
+  requireEnv("ANTHROPIC_API_KEY", "TAVILY_API_KEY");
+  await runAgenticAgent({
+    agentType: "search-agent",
+    label: "SEARCH AGENT",
+    goal,
+    toolRegistry: createToolRegistry(),
+    ...loopFlags(flags),
+  });
 } catch (err) {
   handleError(err);
 }

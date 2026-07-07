@@ -1,30 +1,31 @@
 #!/usr/bin/env node
 /**
- * DB Agent CLI
+ * DB Agent CLI — autonomous agentic loop
  *   node src/db-agent/index.js "design ecommerce database schema" --format prisma
  */
-import { processRequest, handleError, fail, parseArgs, OUTPUT_FORMATS } from "./agent.js";
+import { handleError, fail, parseArgs, requireEnv, OUTPUT_FORMATS } from "./agent.js";
+import { createToolRegistry } from "./tool-registry.js";
+import { runAgenticAgent, loopFlags } from "../core/run-agent.js";
 
 const HELP = `
-🗄  DB Agent — Claude-оор өгөгдлийн сангийн дизайн
+🗄  DB Agent — Claude-оор өгөгдлийн сангийн дизайн (agentic loop)
 
 Хэрэглээ:
-  node src/db-agent/index.js "<хүсэлт>" [--format sql|prisma|typeorm]
+  node src/db-agent/index.js "<хүсэлт>" [--format sql|prisma|typeorm] [--max-iterations N] [--resume <sessionId>]
 
 Жишээ:
   node src/db-agent/index.js "design a users table with authentication fields"
   node src/db-agent/index.js "create database schema for ecommerce app" --format prisma
-  node src/db-agent/index.js "generate migration file for adding payments table"
-  node src/db-agent/index.js "write SQL query to get top 10 customers"
 
 Сонголтууд:
   --format  ${Object.keys(OUTPUT_FORMATS).join(" | ")}  (default: sql)
 
-Үр дүн: output/schema_YYYYMMDDHHmm.sql | .prisma | .ts
-Тэмдэглэл: DB_CONNECTION_STRING (.env) одоогоор зөвхөн нөөцөд — агент SQL-ийг
-бодит DB дээр ажиллуулдаггүй, файл л үүсгэнэ.
+Tools: db (Claude schema → output/), file, write, think
 
+Үр дүн: output/schema_YYYYMMDDHHmm.sql | .prisma | .ts
+Тэмдэглэл: агент SQL-ийг бодит DB дээр ажиллуулдаггүй, файл л үүсгэнэ.
 Шаардлага: .env дотор ANTHROPIC_API_KEY
+Сонголтоор: FIREBASE_DATABASE_URL + FIREBASE_SERVICE_ACCOUNT_PATH (session тракинг)
 `;
 
 const argv = process.argv.slice(2);
@@ -42,8 +43,15 @@ if (!request) {
 }
 
 try {
-  await processRequest(request, {
-    format: typeof flags.format === "string" ? flags.format : undefined,
+  requireEnv("ANTHROPIC_API_KEY");
+  await runAgenticAgent({
+    agentType: "db-agent",
+    label: "DB AGENT",
+    goal: request,
+    toolRegistry: createToolRegistry({
+      format: typeof flags.format === "string" ? flags.format : undefined,
+    }),
+    ...loopFlags(flags),
   });
 } catch (err) {
   handleError(err);

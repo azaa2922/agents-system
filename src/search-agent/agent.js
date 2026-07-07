@@ -91,7 +91,7 @@ export async function callClaude(systemPrompt, userMessage, { maxTokens = 16000,
 }
 
 /* ---------- Tavily ---------- */
-async function tavilySearch(query, maxResults = 5) {
+export async function tavilySearch(query, maxResults = 5) {
   try {
     const res = await axios.post(
       "https://api.tavily.com/search",
