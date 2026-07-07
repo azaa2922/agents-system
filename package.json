@@ -1,7 +1,7 @@
 {
   "name": "agents-system",
   "version": "1.0.0",
-  "description": "Multi-agent AI system powered by Claude — 6 independent CLI agents",
+  "description": "Multi-agent AI system powered by Google Gemini — 6 independent CLI agents",
   "type": "module",
   "private": true,
   "engines": {
@@ -17,15 +17,15 @@
     "test:memory": "node src/core/test-memory.js"
   },
   "keywords": [
-    "claude",
-    "anthropic",
+    "gemini",
+    "google",
     "agents",
     "multi-agent",
     "cli"
   ],
   "license": "MIT",
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.104.1",
+    "@google/genai": "^2.10.0",
     "axios": "^1.17.0",
     "chalk": "^5.6.2",
     "csv-parse": "^6.2.1",

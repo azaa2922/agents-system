@@ -6,7 +6,7 @@
 import { processRequest, handleError, fail, parseArgs } from "./agent.js";
 
 const HELP = `
-🛠  Code Agent — Claude-оор төслийн код үүсгэгч
+🛠  Code Agent — Gemini-ээр төслийн код үүсгэгч
 
 Хэрэглээ:
   node src/code-agent/index.js "<шаардлага>" [--name <төслийн-нэр>] [--git] [--push]
@@ -24,7 +24,7 @@ const HELP = `
 
 Үр дүн: output/PROJECT_NAME/ — бүх эх файл + README.md
 
-Шаардлага: .env дотор ANTHROPIC_API_KEY (push-д GIT_REMOTE_URL)
+Шаардлага: .env дотор GEMINI_API_KEY (push-д GIT_REMOTE_URL)
            (санах ойд нэмэлтээр FIREBASE_DATABASE_URL, FIREBASE_SERVICE_ACCOUNT_PATH)
 `;
 

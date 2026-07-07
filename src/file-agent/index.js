@@ -6,7 +6,7 @@
 import { processRequest, handleError, fail, parseArgs } from "./agent.js";
 
 const HELP = `
-📂 File Agent — Claude-оор файл хувиргагч
+📂 File Agent — Gemini-ээр файл хувиргагч
 
 Хэрэглээ:
   node src/file-agent/index.js "<заавар>" --file <зам> [--file <зам2> ...]
@@ -22,7 +22,7 @@ const HELP = `
 Сонголт:
   --resume <sessionId>   Тасарсан session-ийг үргэлжлүүлэх (crash recovery)
 
-Шаардлага: .env дотор ANTHROPIC_API_KEY
+Шаардлага: .env дотор GEMINI_API_KEY
            (санах ойд нэмэлтээр FIREBASE_DATABASE_URL, FIREBASE_SERVICE_ACCOUNT_PATH)
 `;
 

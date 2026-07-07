@@ -6,7 +6,7 @@
 import { processRequest, handleError, fail, parseArgs } from "./agent.js";
 
 const HELP = `
-📊 Data Agent — Claude-оор өгөгдлийн шинжилгээ
+📊 Data Agent — Gemini-ээр өгөгдлийн шинжилгээ
 
 Хэрэглээ:
   node src/data-agent/index.js "<заавар>" --file <зам>
@@ -22,7 +22,7 @@ const HELP = `
 Сонголт:
   --resume <sessionId>   Тасарсан session-ийг үргэлжлүүлэх (crash recovery)
 
-Шаардлага: .env дотор ANTHROPIC_API_KEY
+Шаардлага: .env дотор GEMINI_API_KEY
            (санах ойд нэмэлтээр FIREBASE_DATABASE_URL, FIREBASE_SERVICE_ACCOUNT_PATH)
 `;
 

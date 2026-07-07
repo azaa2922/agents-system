@@ -6,7 +6,7 @@
 import { processRequest, handleError, fail, parseArgs, OUTPUT_FORMATS } from "./agent.js";
 
 const HELP = `
-🗄  DB Agent — Claude-оор өгөгдлийн сангийн дизайн
+🗄  DB Agent — Gemini-ээр өгөгдлийн сангийн дизайн
 
 Хэрэглээ:
   node src/db-agent/index.js "<хүсэлт>" [--format sql|prisma|typeorm]
@@ -25,7 +25,7 @@ const HELP = `
 Тэмдэглэл: DB_CONNECTION_STRING (.env) одоогоор зөвхөн нөөцөд — агент SQL-ийг
 бодит DB дээр ажиллуулдаггүй, файл л үүсгэнэ.
 
-Шаардлага: .env дотор ANTHROPIC_API_KEY
+Шаардлага: .env дотор GEMINI_API_KEY
            (санах ойд нэмэлтээр FIREBASE_DATABASE_URL, FIREBASE_SERVICE_ACCOUNT_PATH)
 `;
 

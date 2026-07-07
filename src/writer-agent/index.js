@@ -6,7 +6,7 @@
 import { processRequest, handleError, fail, parseArgs, TONES, LENGTHS, FORMATS } from "./agent.js";
 
 const HELP = `
-✍️  Writer Agent — Claude-оор контент бичигч
+✍️  Writer Agent — Gemini-ээр контент бичигч
 
 Хэрэглээ:
   node src/writer-agent/index.js "<сэдэв/заавар>" [--tone ...] [--length ...] [--format ...]
@@ -24,7 +24,7 @@ const HELP = `
 
 Үр дүн: output/content_YYYYMMDDHHmm.md — YAML frontmatter (title, date, format, tone, length)
 
-Шаардлага: .env дотор ANTHROPIC_API_KEY
+Шаардлага: .env дотор GEMINI_API_KEY
            (санах ойд нэмэлтээр FIREBASE_DATABASE_URL, FIREBASE_SERVICE_ACCOUNT_PATH)
 `;
 

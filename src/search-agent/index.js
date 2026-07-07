@@ -6,7 +6,7 @@
 import { processRequest, handleError, fail, parseArgs } from "./agent.js";
 
 const HELP = `
-🔎 Search Agent — Claude + Tavily вэб хайлт
+🔎 Search Agent — Gemini + Tavily вэб хайлт
 
 Хэрэглээ:
   node src/search-agent/index.js "<хайх зүйл>" [--resume <sessionId>]
@@ -17,15 +17,15 @@ const HELP = `
 
 Урсгал (санах ойтой):
   1. Session үүсгэнэ (Firebase тохируулсан бол)
-  2. Claude хайлтын стратеги, query-нүүдийг төлөвлөнө
+  2. Gemini хайлтын стратеги, query-нүүдийг төлөвлөнө
   3. Tavily API-аар хайлт бүрийг гүйцэтгэнэ (олдвор нь context-д хуримтлагдана)
-  4. Claude үр дүнг нэгтгэж дүгнэлт бичнэ
+  4. Gemini үр дүнг нэгтгэж дүгнэлт бичнэ
   5. output/search_YYYYMMDDHHmm.md файлд хадгална
 
 Сонголт:
   --resume <sessionId>   Тасарсан session-ийг үргэлжлүүлэх (crash recovery)
 
-Шаардлага: .env дотор ANTHROPIC_API_KEY, TAVILY_API_KEY
+Шаардлага: .env дотор GEMINI_API_KEY, TAVILY_API_KEY
            (санах ойд нэмэлтээр FIREBASE_DATABASE_URL, FIREBASE_SERVICE_ACCOUNT_PATH)
 `;
 

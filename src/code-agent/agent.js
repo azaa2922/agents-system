@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 import dotenv from "dotenv";
 import chalk from "chalk";
-import Anthropic from "@anthropic-ai/sdk";
+import { GoogleGenAI, Type, ApiError } from "@google/genai";
 import fse from "fs-extra";
 import { runAgent } from "../core/runner.js";
 
@@ -20,7 +20,7 @@ export const OUTPUT_DIR = path.join(ROOT, "output");
 
 dotenv.config({ path: path.join(ROOT, ".env"), quiet: true });
 
-const MODEL = "claude-opus-4-8";
+const MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
 
 /* ---------- logging helpers ---------- */
 const clock = () => new Date().toTimeString().slice(0, 8);
@@ -48,12 +48,14 @@ export function requireEnv(...names) {
 }
 
 export function handleError(err) {
-  if (err instanceof Anthropic.AuthenticationError) {
-    fail("ANTHROPIC_API_KEY буруу эсвэл хүчингүй байна — .env файлаа шалгана уу");
-  } else if (err instanceof Anthropic.RateLimitError) {
-    fail("Claude API rate limit — түр хүлээгээд дахин оролдоно уу");
-  } else if (err instanceof Anthropic.APIError) {
-    fail(`Claude API алдаа (${err.status}): ${err.message}`);
+  if (err instanceof ApiError) {
+    if (err.status === 401 || err.status === 403 || (err.status === 400 && /api key/i.test(err.message))) {
+      fail("GEMINI_API_KEY буруу эсвэл хүчингүй байна — .env файлаа шалгана уу");
+    } else if (err.status === 429) {
+      fail("Gemini API rate limit — түр хүлээгээд дахин оролдоно уу");
+    } else {
+      fail(`Gemini API алдаа (${err.status}): ${err.message}`);
+    }
   } else if (err?.code === "ENOENT") {
     fail(`Файл олдсонгүй: ${err.path}`);
   } else {
@@ -83,62 +85,68 @@ export function parseArgs(argv, { booleans = [], multi = [] } = {}) {
   return { positional, flags };
 }
 
-/* ---------- Claude ---------- */
+/* ---------- Gemini ---------- */
 let client;
-const getClient = () => (client ??= new Anthropic());
+const getClient = () => (client ??= new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY }));
 
-export async function callClaude(systemPrompt, userMessage, { maxTokens = 16000, schema = null } = {}) {
-  const params = {
-    model: MODEL,
-    max_tokens: maxTokens,
-    thinking: { type: "adaptive" },
-    system: systemPrompt,
-    messages: [{ role: "user", content: userMessage }],
-  };
+export async function callGemini(systemPrompt, userMessage, { schema = null } = {}) {
+  const config = { systemInstruction: systemPrompt };
   if (schema) {
-    params.output_config = { format: { type: "json_schema", schema } };
+    config.responseMimeType = "application/json";
+    config.responseSchema = schema;
   }
 
   const t0 = Date.now();
-  const response = await getClient().messages.create(params);
+  const response = await getClient().models.generateContent({
+    model: MODEL,
+    contents: userMessage,
+    config,
+  });
   const sec = ((Date.now() - t0) / 1000).toFixed(1);
-  const tokens = (response.usage?.input_tokens || 0) + (response.usage?.output_tokens || 0);
-  log(`${chalk.cyan("Claude")} ${MODEL} · ${sec}s · in ${response.usage.input_tokens} / out ${response.usage.output_tokens} tokens`);
+  const usage = response.usageMetadata ?? {};
+  const tokens = usage.totalTokenCount ?? 0;
+  const thinking = usage.thoughtsTokenCount ? ` / thinking ${usage.thoughtsTokenCount}` : "";
+  log(`${chalk.cyan("Gemini")} ${MODEL} · ${sec}s · in ${usage.promptTokenCount ?? 0} / out ${usage.candidatesTokenCount ?? 0}${thinking} tokens`);
 
-  if (response.stop_reason === "refusal") {
-    throw new Error("Claude хүсэлтийг аюулгүй байдлын үүднээс гүйцэтгэхээс татгалзлаа");
+  const blocked = response.promptFeedback?.blockReason;
+  if (blocked) {
+    throw new Error(`Gemini хүсэлтийг блоклолоо (${blocked})`);
   }
-  if (response.stop_reason === "max_tokens") {
-    log(chalk.yellow("⚠ Хариу max_tokens хязгаарт тулсан тул тасарсан байж болзошгүй"));
+  const finish = response.candidates?.[0]?.finishReason;
+  if (["SAFETY", "PROHIBITED_CONTENT", "BLOCKLIST", "SPII", "RECITATION"].includes(finish)) {
+    throw new Error(`Gemini хариултыг аюулгүй байдлын үүднээс зогсоолоо (${finish})`);
+  }
+  if (finish === "MAX_TOKENS") {
+    log(chalk.yellow("⚠ Хариу токены хязгаарт тулсан тул тасарсан байж болзошгүй"));
   }
 
-  const textBlocks = response.content.filter((b) => b.type === "text");
-  const result = schema ? JSON.parse(textBlocks[0].text) : textBlocks.map((b) => b.text).join("\n");
+  const text = response.text;
+  if (!text) throw new Error(`Gemini хоосон хариу буцаалаа (finishReason: ${finish ?? "?"})`);
+  const result = schema ? JSON.parse(text) : text;
   return { result, tokens };
 }
 
 /* ---------- prompts / schema ---------- */
 const CODE_SCHEMA = {
-  type: "object",
+  type: Type.OBJECT,
   properties: {
-    project_name: { type: "string", description: "Short kebab-case project folder name" },
-    description: { type: "string", description: "One-sentence project description" },
+    project_name: { type: Type.STRING, description: "Short kebab-case project folder name" },
+    description: { type: Type.STRING, description: "One-sentence project description" },
     files: {
-      type: "array",
+      type: Type.ARRAY,
       description: "Every file the project needs, including README.md",
       items: {
-        type: "object",
+        type: Type.OBJECT,
         properties: {
-          path: { type: "string", description: "Relative file path inside the project, e.g. src/App.jsx" },
-          content: { type: "string", description: "Full file content" },
+          path: { type: Type.STRING, description: "Relative file path inside the project, e.g. src/App.jsx" },
+          content: { type: Type.STRING, description: "Full file content" },
         },
         required: ["path", "content"],
-        additionalProperties: false,
       },
     },
   },
   required: ["project_name", "description", "files"],
-  additionalProperties: false,
+  propertyOrdering: ["project_name", "description", "files"],
 };
 
 const SYSTEM = `You are a code-generation agent. Given a requirement, produce a complete, runnable project.
@@ -163,7 +171,7 @@ function git(args, cwd) {
 
 /* ---------- main flow ---------- */
 export async function processRequest(requirement, { name, useGit = false, push = false, resume = null } = {}) {
-  requireEnv("ANTHROPIC_API_KEY");
+  requireEnv("GEMINI_API_KEY");
   log(`🛠  Starting Code Agent — "${requirement}"`);
 
   let projectDir = null;
@@ -178,19 +186,19 @@ export async function processRequest(requirement, { name, useGit = false, push =
       const steps = [
         {
           action: "generate",
-          description: "Claude writes the full project",
+          description: "Gemini writes the full project",
           run: async () => {
-            const { result, tokens } = await callClaude(SYSTEM, `Requirement: ${requirement}`, { schema: CODE_SCHEMA });
-            if (!result.files?.length) fail("Claude нэг ч файл үүсгэсэнгүй");
+            const { result, tokens } = await callGemini(SYSTEM, `Requirement: ${requirement}`, { schema: CODE_SCHEMA });
+            if (!result.files?.length) fail("Gemini нэг ч файл үүсгэсэнгүй");
             generated = result;
-            logStep(1, `Claude "${result.project_name}" төслийн ${result.files.length} файлыг бэлдлээ`);
+            logStep(1, `Gemini "${result.project_name}" төслийн ${result.files.length} файлыг бэлдлээ`);
             return {
               result: `${result.files.length} файл — ${result.project_name}`,
               tokens,
               context: {
                 accumulated_knowledge: result.description,
                 decisions_made: [`Generate project: ${result.project_name}`],
-                last_claude_response: result.description,
+                last_gemini_response: result.description,
               },
             };
           },

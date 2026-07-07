@@ -34,7 +34,7 @@ const agentRef = (id) => db.child("agents").child(id);
  * Context-ийг ухаалгаар нэгтгэнэ:
  *  - массив талбар (files_created, decisions_made) → нэмээд давхардлыг арилгана
  *  - объект талбар → гүехэн merge
- *  - бусад (accumulated_knowledge, last_claude_response) → шинэ утгаар солино
+ *  - бусад (accumulated_knowledge, last_gemini_response) → шинэ утгаар солино
  */
 export function mergeContext(existing = {}, update = {}) {
   const out = { ...(existing || {}) };
@@ -148,7 +148,7 @@ export async function createSession(goal, agentType) {
       accumulated_knowledge: "",
       files_created: [],
       decisions_made: [],
-      last_claude_response: "",
+      last_gemini_response: "",
     },
     metadata: {
       total_tokens: 0,

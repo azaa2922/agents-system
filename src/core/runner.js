@@ -21,7 +21,7 @@ export async function runSteps(sessionId, steps, { log = () => {}, resume = fals
     accumulated_knowledge: "",
     files_created: [],
     decisions_made: [],
-    last_claude_response: "",
+    last_gemini_response: "",
   };
 
   // Шинэ ажиллагаанд алхмуудыг бүртгэнэ; resume үед аль хэдийн байгаа.

@@ -1,5 +1,5 @@
 /**
- * Search Agent — Claude төлөвлөж, Tavily API-аар вэб хайлт хийж,
+ * Search Agent — Gemini төлөвлөж, Tavily API-аар вэб хайлт хийж,
  * үр дүнг нэгтгэн дүгнээд /output руу хадгална.
  *
  * Санах ой: алхам бүр Firebase-д бүртгэгдэж, хайлт бүрийн олдвор context-д
@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
 import chalk from "chalk";
 import axios from "axios";
-import Anthropic from "@anthropic-ai/sdk";
+import { GoogleGenAI, Type, ApiError } from "@google/genai";
 import fse from "fs-extra";
 import { runAgent } from "../core/runner.js";
 
@@ -20,7 +20,7 @@ export const OUTPUT_DIR = path.join(ROOT, "output");
 
 dotenv.config({ path: path.join(ROOT, ".env"), quiet: true });
 
-const MODEL = "claude-opus-4-8";
+const MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
 
 /* ---------- logging helpers ---------- */
 const clock = () => new Date().toTimeString().slice(0, 8);
@@ -48,12 +48,14 @@ export function requireEnv(...names) {
 }
 
 export function handleError(err) {
-  if (err instanceof Anthropic.AuthenticationError) {
-    fail("ANTHROPIC_API_KEY буруу эсвэл хүчингүй байна — .env файлаа шалгана уу");
-  } else if (err instanceof Anthropic.RateLimitError) {
-    fail("Claude API rate limit — түр хүлээгээд дахин оролдоно уу");
-  } else if (err instanceof Anthropic.APIError) {
-    fail(`Claude API алдаа (${err.status}): ${err.message}`);
+  if (err instanceof ApiError) {
+    if (err.status === 401 || err.status === 403 || (err.status === 400 && /api key/i.test(err.message))) {
+      fail("GEMINI_API_KEY буруу эсвэл хүчингүй байна — .env файлаа шалгана уу");
+    } else if (err.status === 429) {
+      fail("Gemini API rate limit — түр хүлээгээд дахин оролдоно уу");
+    } else {
+      fail(`Gemini API алдаа (${err.status}): ${err.message}`);
+    }
   } else if (err?.code === "ENOENT") {
     fail(`Файл олдсонгүй: ${err.path}`);
   } else {
@@ -83,37 +85,44 @@ export function parseArgs(argv, { booleans = [], multi = [] } = {}) {
   return { positional, flags };
 }
 
-/* ---------- Claude ---------- */
+/* ---------- Gemini ---------- */
 let client;
-const getClient = () => (client ??= new Anthropic());
+const getClient = () => (client ??= new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY }));
 
-export async function callClaude(systemPrompt, userMessage, { maxTokens = 16000, schema = null } = {}) {
-  const params = {
-    model: MODEL,
-    max_tokens: maxTokens,
-    thinking: { type: "adaptive" },
-    system: systemPrompt,
-    messages: [{ role: "user", content: userMessage }],
-  };
+export async function callGemini(systemPrompt, userMessage, { schema = null } = {}) {
+  const config = { systemInstruction: systemPrompt };
   if (schema) {
-    params.output_config = { format: { type: "json_schema", schema } };
+    config.responseMimeType = "application/json";
+    config.responseSchema = schema;
   }
 
   const t0 = Date.now();
-  const response = await getClient().messages.create(params);
+  const response = await getClient().models.generateContent({
+    model: MODEL,
+    contents: userMessage,
+    config,
+  });
   const sec = ((Date.now() - t0) / 1000).toFixed(1);
-  const tokens = (response.usage?.input_tokens || 0) + (response.usage?.output_tokens || 0);
-  log(`${chalk.cyan("Claude")} ${MODEL} · ${sec}s · in ${response.usage.input_tokens} / out ${response.usage.output_tokens} tokens`);
+  const usage = response.usageMetadata ?? {};
+  const tokens = usage.totalTokenCount ?? 0;
+  const thinking = usage.thoughtsTokenCount ? ` / thinking ${usage.thoughtsTokenCount}` : "";
+  log(`${chalk.cyan("Gemini")} ${MODEL} · ${sec}s · in ${usage.promptTokenCount ?? 0} / out ${usage.candidatesTokenCount ?? 0}${thinking} tokens`);
 
-  if (response.stop_reason === "refusal") {
-    throw new Error("Claude хүсэлтийг аюулгүй байдлын үүднээс гүйцэтгэхээс татгалзлаа");
+  const blocked = response.promptFeedback?.blockReason;
+  if (blocked) {
+    throw new Error(`Gemini хүсэлтийг блоклолоо (${blocked})`);
   }
-  if (response.stop_reason === "max_tokens") {
-    log(chalk.yellow("⚠ Хариу max_tokens хязгаарт тулсан тул тасарсан байж болзошгүй"));
+  const finish = response.candidates?.[0]?.finishReason;
+  if (["SAFETY", "PROHIBITED_CONTENT", "BLOCKLIST", "SPII", "RECITATION"].includes(finish)) {
+    throw new Error(`Gemini хариултыг аюулгүй байдлын үүднээс зогсоолоо (${finish})`);
+  }
+  if (finish === "MAX_TOKENS") {
+    log(chalk.yellow("⚠ Хариу токены хязгаарт тулсан тул тасарсан байж болзошгүй"));
   }
 
-  const textBlocks = response.content.filter((b) => b.type === "text");
-  const result = schema ? JSON.parse(textBlocks[0].text) : textBlocks.map((b) => b.text).join("\n");
+  const text = response.text;
+  if (!text) throw new Error(`Gemini хоосон хариу буцаалаа (finishReason: ${finish ?? "?"})`);
+  const result = schema ? JSON.parse(text) : text;
   return { result, tokens };
 }
 
@@ -141,17 +150,17 @@ async function tavilySearch(query, maxResults = 5) {
 
 /* ---------- prompts / schema ---------- */
 const PLAN_SCHEMA = {
-  type: "object",
+  type: Type.OBJECT,
   properties: {
-    strategy: { type: "string", description: "One-sentence search strategy" },
+    strategy: { type: Type.STRING, description: "One-sentence search strategy" },
     queries: {
-      type: "array",
+      type: Type.ARRAY,
       description: "1 to 4 focused web-search queries",
-      items: { type: "string" },
+      items: { type: Type.STRING },
     },
   },
   required: ["strategy", "queries"],
-  additionalProperties: false,
+  propertyOrdering: ["strategy", "queries"],
 };
 
 const PLANNER_SYSTEM = `You are the planning module of a web-search agent.
@@ -168,7 +177,7 @@ Answer in the same language as the user's request (Mongolian request → Mongoli
 
 /* ---------- main flow ---------- */
 export async function processRequest(userInput, { resume = null } = {}) {
-  requireEnv("ANTHROPIC_API_KEY", "TAVILY_API_KEY");
+  requireEnv("GEMINI_API_KEY", "TAVILY_API_KEY");
   log(`🔎 Starting Search Agent — "${userInput}"`);
 
   let outPath = null;
@@ -179,7 +188,7 @@ export async function processRequest(userInput, { resume = null } = {}) {
     log,
     resume,
     buildSteps: async ({ resumed }) => {
-      // Плейн: санах ойгоос сэргээх эсвэл Claude-аар шинээр төлөвлөх.
+      // Плейн: санах ойгоос сэргээх эсвэл Gemini-ээр шинээр төлөвлөх.
       let strategy;
       let queries;
       let planTokens = 0;
@@ -187,14 +196,13 @@ export async function processRequest(userInput, { resume = null } = {}) {
         ({ strategy, queries } = resumed.context.plan);
         log(`↩️  Төлөвлөгөөг санах ойгоос сэргээв (${queries.length} query)`);
       } else {
-        const { result: plan, tokens } = await callClaude(PLANNER_SYSTEM, userInput, {
+        const { result: plan, tokens } = await callGemini(PLANNER_SYSTEM, userInput, {
           schema: PLAN_SCHEMA,
-          maxTokens: 4000,
         });
         strategy = plan.strategy;
         queries = plan.queries.slice(0, 4);
         planTokens = tokens;
-        if (queries.length === 0) fail("Claude хайлтын query гаргаж чадсангүй");
+        if (queries.length === 0) fail("Gemini хайлтын query гаргаж чадсангүй");
       }
       logStep(1, `Төлөвлөгөө: ${strategy} (${queries.length} query)`);
 
@@ -234,7 +242,7 @@ export async function processRequest(userInput, { resume = null } = {}) {
         })),
         {
           action: "summarize",
-          description: "Summarize findings via Claude",
+          description: "Summarize findings via Gemini",
           run: async () => {
             resultsText = searchResults
               .map(
@@ -250,16 +258,16 @@ export async function processRequest(userInput, { resume = null } = {}) {
                     : "_үр дүн олдсонгүй_"),
               )
               .join("\n\n");
-            const { result: summary, tokens } = await callClaude(
+            const { result: summary, tokens } = await callGemini(
               SUMMARY_SYSTEM,
               `Хэрэглэгчийн хүсэлт: ${userInput}\n\nХайлтын түүхий үр дүн:\n\n${resultsText}`,
             );
             summaryText = summary;
-            logStep(3, "Claude үр дүнг нэгтгэж дүгнэлт гаргалаа");
+            logStep(3, "Gemini үр дүнг нэгтгэж дүгнэлт гаргалаа");
             return {
               result: `Summary ready (${summary.length} chars)`,
               tokens,
-              context: { last_claude_response: summary.slice(0, 500) },
+              context: { last_gemini_response: summary.slice(0, 500) },
             };
           },
         },

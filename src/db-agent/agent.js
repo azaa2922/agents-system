@@ -1,5 +1,5 @@
 /**
- * DB Agent — өгөгдлийн сангийн schema, migration, query-г Claude-оор
+ * DB Agent — өгөгдлийн сангийн schema, migration, query-г Gemini-ээр
  * зохиолгож SQL / Prisma / TypeORM файлд хадгална.
  *
  * Санах ой: generate → save алхмуудаар явж, алхам бүр Firebase-д бүртгэгдэнэ.
@@ -9,7 +9,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
 import chalk from "chalk";
-import Anthropic from "@anthropic-ai/sdk";
+import { GoogleGenAI, Type, ApiError } from "@google/genai";
 import fse from "fs-extra";
 import { runAgent } from "../core/runner.js";
 
@@ -19,7 +19,7 @@ export const OUTPUT_DIR = path.join(ROOT, "output");
 
 dotenv.config({ path: path.join(ROOT, ".env"), quiet: true });
 
-const MODEL = "claude-opus-4-8";
+const MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
 
 export const OUTPUT_FORMATS = {
   sql: { ext: ".sql", label: "raw SQL (PostgreSQL dialect unless the request says otherwise)" },
@@ -53,12 +53,14 @@ export function requireEnv(...names) {
 }
 
 export function handleError(err) {
-  if (err instanceof Anthropic.AuthenticationError) {
-    fail("ANTHROPIC_API_KEY буруу эсвэл хүчингүй байна — .env файлаа шалгана уу");
-  } else if (err instanceof Anthropic.RateLimitError) {
-    fail("Claude API rate limit — түр хүлээгээд дахин оролдоно уу");
-  } else if (err instanceof Anthropic.APIError) {
-    fail(`Claude API алдаа (${err.status}): ${err.message}`);
+  if (err instanceof ApiError) {
+    if (err.status === 401 || err.status === 403 || (err.status === 400 && /api key/i.test(err.message))) {
+      fail("GEMINI_API_KEY буруу эсвэл хүчингүй байна — .env файлаа шалгана уу");
+    } else if (err.status === 429) {
+      fail("Gemini API rate limit — түр хүлээгээд дахин оролдоно уу");
+    } else {
+      fail(`Gemini API алдаа (${err.status}): ${err.message}`);
+    }
   } else if (err?.code === "ENOENT") {
     fail(`Файл олдсонгүй: ${err.path}`);
   } else {
@@ -88,55 +90,62 @@ export function parseArgs(argv, { booleans = [], multi = [] } = {}) {
   return { positional, flags };
 }
 
-/* ---------- Claude ---------- */
+/* ---------- Gemini ---------- */
 let client;
-const getClient = () => (client ??= new Anthropic());
+const getClient = () => (client ??= new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY }));
 
-export async function callClaude(systemPrompt, userMessage, { maxTokens = 16000, schema = null } = {}) {
-  const params = {
-    model: MODEL,
-    max_tokens: maxTokens,
-    thinking: { type: "adaptive" },
-    system: systemPrompt,
-    messages: [{ role: "user", content: userMessage }],
-  };
+export async function callGemini(systemPrompt, userMessage, { schema = null } = {}) {
+  const config = { systemInstruction: systemPrompt };
   if (schema) {
-    params.output_config = { format: { type: "json_schema", schema } };
+    config.responseMimeType = "application/json";
+    config.responseSchema = schema;
   }
 
   const t0 = Date.now();
-  const response = await getClient().messages.create(params);
+  const response = await getClient().models.generateContent({
+    model: MODEL,
+    contents: userMessage,
+    config,
+  });
   const sec = ((Date.now() - t0) / 1000).toFixed(1);
-  const tokens = (response.usage?.input_tokens || 0) + (response.usage?.output_tokens || 0);
-  log(`${chalk.cyan("Claude")} ${MODEL} · ${sec}s · in ${response.usage.input_tokens} / out ${response.usage.output_tokens} tokens`);
+  const usage = response.usageMetadata ?? {};
+  const tokens = usage.totalTokenCount ?? 0;
+  const thinking = usage.thoughtsTokenCount ? ` / thinking ${usage.thoughtsTokenCount}` : "";
+  log(`${chalk.cyan("Gemini")} ${MODEL} · ${sec}s · in ${usage.promptTokenCount ?? 0} / out ${usage.candidatesTokenCount ?? 0}${thinking} tokens`);
 
-  if (response.stop_reason === "refusal") {
-    throw new Error("Claude хүсэлтийг аюулгүй байдлын үүднээс гүйцэтгэхээс татгалзлаа");
+  const blocked = response.promptFeedback?.blockReason;
+  if (blocked) {
+    throw new Error(`Gemini хүсэлтийг блоклолоо (${blocked})`);
   }
-  if (response.stop_reason === "max_tokens") {
-    log(chalk.yellow("⚠ Хариу max_tokens хязгаарт тулсан тул тасарсан байж болзошгүй"));
+  const finish = response.candidates?.[0]?.finishReason;
+  if (["SAFETY", "PROHIBITED_CONTENT", "BLOCKLIST", "SPII", "RECITATION"].includes(finish)) {
+    throw new Error(`Gemini хариултыг аюулгүй байдлын үүднээс зогсоолоо (${finish})`);
+  }
+  if (finish === "MAX_TOKENS") {
+    log(chalk.yellow("⚠ Хариу токены хязгаарт тулсан тул тасарсан байж болзошгүй"));
   }
 
-  const textBlocks = response.content.filter((b) => b.type === "text");
-  const result = schema ? JSON.parse(textBlocks[0].text) : textBlocks.map((b) => b.text).join("\n");
+  const text = response.text;
+  if (!text) throw new Error(`Gemini хоосон хариу буцаалаа (finishReason: ${finish ?? "?"})`);
+  const result = schema ? JSON.parse(text) : text;
   return { result, tokens };
 }
 
 /* ---------- prompts / schema ---------- */
 const DB_SCHEMA = {
-  type: "object",
+  type: Type.OBJECT,
   properties: {
     content: {
-      type: "string",
+      type: Type.STRING,
       description: "Full content of the schema/migration/query file — code only, no markdown fences",
     },
     notes: {
-      type: "string",
+      type: Type.STRING,
       description: "Short design notes in Mongolian (indexes, constraints, assumptions)",
     },
   },
   required: ["content", "notes"],
-  additionalProperties: false,
+  propertyOrdering: ["content", "notes"],
 };
 
 const buildSystem = (label) => `You are a database design agent.
@@ -148,7 +157,7 @@ Rules:
 
 /* ---------- main flow ---------- */
 export async function processRequest(request, { format = "sql", resume = null } = {}) {
-  requireEnv("ANTHROPIC_API_KEY");
+  requireEnv("GEMINI_API_KEY");
   const fmt = OUTPUT_FORMATS[format];
   if (!fmt) fail(`--format утга буруу: "${format}" (зөв: ${Object.keys(OUTPUT_FORMATS).join(" | ")})`);
 
@@ -165,9 +174,9 @@ export async function processRequest(request, { format = "sql", resume = null } 
     buildSteps: async () => [
       {
         action: "generate",
-        description: `Claude generates ${format.toUpperCase()}`,
+        description: `Gemini generates ${format.toUpperCase()}`,
         run: async () => {
-          const { result, tokens } = await callClaude(buildSystem(fmt.label), request, { schema: DB_SCHEMA });
+          const { result, tokens } = await callGemini(buildSystem(fmt.label), request, { schema: DB_SCHEMA });
           generated = result;
           logStep(1, `${format.toUpperCase()} код бэлэн боллоо`);
           if (result.notes) log(`📝 ${result.notes}`);
@@ -176,7 +185,7 @@ export async function processRequest(request, { format = "sql", resume = null } 
             tokens,
             context: {
               accumulated_knowledge: result.notes || `${format} generated`,
-              last_claude_response: (result.notes || "").slice(0, 300),
+              last_gemini_response: (result.notes || "").slice(0, 300),
               decisions_made: [`Output format: ${format}`],
             },
           };
