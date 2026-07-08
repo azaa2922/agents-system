@@ -12,14 +12,19 @@ agents-system/
 ├── README.md
 ├── output/               # бүх агентын үр дүн энд хадгалагдана
 └── src/
+    ├── core/             # 🧠 agentic loop, memory (Firebase), orchestrator
+    ├── orchestrator/     # 🧭 6 агентыг зохицуулагч (meta-agent)
     ├── search-agent/     # 🔎 вэб хайлт (Tavily)
     ├── file-agent/       # 📂 файл хувиргалт
     ├── code-agent/       # 🛠  код үүсгэгч
     ├── data-agent/       # 📊 өгөгдлийн шинжилгээ
     ├── writer-agent/     # ✍️  контент бичигч
     └── db-agent/         # 🗄  өгөгдлийн сангийн дизайн
-    # агент бүр index.js (CLI) + agent.js (логик) гэсэн 2 файлтай
+    # агент бүр index.js (CLI) + agent.js (логик) + tool-registry.js (agentic loop tools)
 ```
+
+Агент бүр **agentic loop** (plan → execute → reflect) дээр ажиллаж, зорилго биелтэл давтдаг.
+Session бүр `src/core/memory.js`-ээр Firebase RTDB-д (тохируулбал) эсвэл in-memory горимд хадгалагдана.
 
 ## 🚀 Суулгах
 
@@ -139,6 +144,35 @@ node src/db-agent/index.js "write SQL query to get top 10 customers" --format sq
 
 ---
 
+## 🧭 Orchestrator — олон агентыг зохицуулагч
+
+**Зорилго:** Нэг том зорилгыг авч, дэд ажлууд болгон задалж, тохирох агент бүрд (search, code, data, file, write, db) чиглүүлнэ. Orchestrator нь агентуудтай **ижил `AgenticLoop` хөдөлгүүрийг** давхар (meta) түвшинд ашигладаг: төлөвлөнө → аль агентыг ажиллуулахаа сонгоно → үр дүнг эргэцүүлнэ → зорилго биелтэл давтана.
+
+```bash
+node src/orchestrator/index.js "research the top React frameworks, scaffold a starter app, and write a launch blog post"
+node src/orchestrator/index.js "analyze sales.csv then design a database schema for the findings" --agents data,db
+```
+
+- **Урсгал:** том зорилго → агент сонгоно → тухайн агент өөрийн agentic loop-оор ажиллана (child session) → эргэцүүлж дараагийн агентыг сонгоно
+- **Session бүтэц:** parent (orchestrator) session-ий доор агент бүрийн child session `sessions/<parent>/children/<child>` хэлбэрээр Firebase-д хадгалагдана. Parent-ийн `context.delegations`-д агент бүрийн үр дүн бүртгэгдэнэ.
+- **Сонголтууд:**
+  - `--agents a,b,c` — зөвхөн эдгээр агентыг ашиглах (default: бүгд)
+  - `--max-iterations N` — orchestrator-ийн давталтын хязгаар (default: 15)
+  - `--sub-iterations N` — агент тус бүрийн дэд давталтын хязгаар (default: 10)
+  - `--resume <id>` — тасалдсан orchestrator session-ийг үргэлжлүүлэх
+- **Шаардлага:** `ANTHROPIC_API_KEY` (search-д нэмж `TAVILY_API_KEY`)
+- Нэг агент бүтэлгүйтвэл orchestrator зогсохгүй — үр дүнг нь "incomplete" гэж бүртгээд өөр замаар үргэлжилнэ.
+
+Програмчлалын хэрэглээ (embed):
+
+```js
+import { Orchestrator } from "./src/core/orchestrator.js";
+const result = await new Orchestrator().run("build and document a REST API");
+// → { success, result, iterations, sessionId }
+```
+
+---
+
 ## ⚡ npm товчлолууд
 
 ```bash
@@ -148,6 +182,8 @@ npm run code   -- "generate todo app"
 npm run data   -- "find trends" --file sales.csv
 npm run write  -- "blog post about AI" --tone casual
 npm run db     -- "users table schema" --format prisma
+npm run orchestrate -- "research, build, and document a todo app"
+npm test       # agentic loop + orchestrator test suite (offline)
 ```
 
 ## 🧰 Нийтлэг шинжүүд

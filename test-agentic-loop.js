@@ -345,6 +345,129 @@ section("6. Error recovery");
   check("error iterations were tracked", memory.getSession(sid6e).metadata.iterations === 3);
 }
 
+/* ─────────────────── 7. Orchestrator ─────────────────── */
+section("7. Orchestrator — coordinates all 6 agents");
+
+const orch = await import("./src/core/orchestrator.js");
+const AGENT_NAMES = ["search", "code", "data", "file", "write", "db"];
+
+check("AGENTS roster has all 6 specialist agents", AGENT_NAMES.every((a) => a in orch.AGENTS) && Object.keys(orch.AGENTS).length === 6);
+check(
+  "each agent has createRegistry + description",
+  AGENT_NAMES.every(
+    (a) => typeof orch.AGENTS[a].createRegistry === "function" && typeof orch.AGENTS[a].description === "string",
+  ),
+);
+check(
+  "ORCHESTRATOR_TOOL_DESCRIPTIONS covers every agent",
+  AGENT_NAMES.every((a) => typeof orch.ORCHESTRATOR_TOOL_DESCRIPTIONS[a] === "string" && orch.ORCHESTRATOR_TOOL_DESCRIPTIONS[a].length > 0),
+);
+
+/* Registry with injected fake child loops → no real API/agent calls */
+{
+  const parentSid = await memory.createSession("orchestrator", "big goal");
+  const registry = orch.createOrchestratorRegistry({
+    memory,
+    apiKey: null,
+    parentSessionId: parentSid,
+    maxSubIterations: 5,
+    makeLoop: (agentName, childSessionId, subGoal) => ({
+      run: async () => ({ success: true, result: `${agentName} handled: ${subGoal}`, iterations: 2 }),
+    }),
+  });
+
+  check("registry exposes one tool per agent", AGENT_NAMES.every((a) => typeof registry[a] === "function"));
+
+  const codeResult = await registry.code({ goal: "scaffold a React app" });
+  check("delegation returns a summary string", /code agent/.test(codeResult) && /completed/.test(codeResult));
+
+  const parent = memory.getSession(parentSid);
+  check("child session created + linked to parent", Array.isArray(parent.children) && parent.children.length === 1);
+  const childSid = parent.children[0];
+  check("child records parent session id", memory.getSession(childSid).metadata.parent === parentSid);
+  check("child agentType is the routed agent", memory.getSession(childSid).metadata.agentType === "code");
+  check("parent context records the delegation", (await memory.getContext(parentSid)).delegations.some((d) => d.agent === "code" && d.success === true));
+
+  let threwNoGoal = false;
+  try {
+    await registry.search({});
+  } catch {
+    threwNoGoal = true;
+  }
+  check("delegation requires a 'goal' param", threwNoGoal === true);
+
+  let threwUnknown = false;
+  try {
+    orch.createOrchestratorRegistry({ memory, parentSessionId: parentSid, agents: ["nope"] });
+  } catch {
+    threwUnknown = true;
+  }
+  check("unknown agent name rejected", threwUnknown === true);
+}
+
+/* Full orchestrator loop: mock planner routes to 2 agents, child loops stubbed */
+{
+  const orchGoal = "research frameworks then scaffold an app";
+  const sid = await memory.createSession("orchestrator", orchGoal);
+  const registry = orch.createOrchestratorRegistry({
+    memory,
+    apiKey: null,
+    parentSessionId: sid,
+    makeLoop: (agentName) => ({
+      run: async () => ({ success: true, result: `${agentName} done`, iterations: 1 }),
+    }),
+  });
+  const llm = mockLlm(
+    [
+      {
+        reasoning: "search, then code",
+        steps: [
+          { action: "search", description: "research frameworks", params: '{"goal":"find top React frameworks"}' },
+          { action: "code", description: "scaffold app", params: '{"goal":"scaffold a React starter"}' },
+        ],
+      },
+    ],
+    [reflectionDone("both agents delivered")],
+  );
+  const loop = new AgenticLoop(sid, memory, null, registry, {
+    llmCall: llm,
+    toolDescriptions: orch.ORCHESTRATOR_TOOL_DESCRIPTIONS,
+  });
+  const result = await loop.run(orchGoal, 5);
+
+  check("orchestrator loop completes across agents", result.success === true && result.iterations === 1);
+  check("orchestrator spawned 2 child sessions", (memory.getSession(sid).children || []).length === 2);
+  check("both delegations recorded on parent", (await memory.getContext(sid)).delegations.length === 2);
+  check("child sessions use routed agent types", (() => {
+    const kinds = memory.getSession(sid).children.map((c) => memory.getSession(c).metadata.agentType);
+    return kinds.includes("search") && kinds.includes("code");
+  })());
+}
+
+/* Orchestrator planner sees agent descriptions (routing context) */
+{
+  const sid = await memory.createSession("orchestrator", "descr check");
+  let capturedSystem = "";
+  const registry = orch.createOrchestratorRegistry({
+    memory,
+    parentSessionId: sid,
+    makeLoop: () => ({ run: async () => ({ success: true, result: "ok", iterations: 1 }) }),
+  });
+  const llm = async (system, _user, { schema }) => {
+    if (schema?.properties?.steps) {
+      capturedSystem = system;
+      return { reasoning: "done", steps: [] };
+    }
+    return reflectionDone("n/a");
+  };
+  const loop = new AgenticLoop(sid, memory, null, registry, {
+    llmCall: llm,
+    toolDescriptions: orch.ORCHESTRATOR_TOOL_DESCRIPTIONS,
+  });
+  await loop.run("descr check", 2);
+  check("planner prompt embeds agent descriptions", /Web search/.test(capturedSystem) && /database schemas/.test(capturedSystem));
+}
+
 /* ─────────────────── Summary ─────────────────── */
 console.log("\n" + "=".repeat(50));
 if (failed === 0) {

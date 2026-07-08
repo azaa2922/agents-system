@@ -14,6 +14,7 @@
     "data": "node src/data-agent/index.js",
     "write": "node src/writer-agent/index.js",
     "db": "node src/db-agent/index.js",
+    "orchestrate": "node src/orchestrator/index.js",
     "test": "node test-agentic-loop.js",
     "test:agentic": "node test-agentic-loop.js",
     "test:setup": "node test-agentic-setup.js"

@@ -83,6 +83,7 @@ export class AgenticLoop {
     this.memory = memory;
     this.apiKey = apiKey ?? process.env.ANTHROPIC_API_KEY ?? null;
     this.tools = toolRegistry;
+    this.toolDescriptions = options.toolDescriptions || {}; // action → what it does
     this.model = options.model || MODEL;
     this.maxIterations = options.maxIterations ?? 20;
     this.iterationCount = 0;
@@ -191,8 +192,12 @@ export class AgenticLoop {
   /* ---------- PLAN ---------- */
   async _plan(goal, context) {
     const actions = Object.keys(this.tools);
+    const actionList = actions
+      .map((a) => (this.toolDescriptions[a] ? `  - ${a}: ${this.toolDescriptions[a]}` : `  - ${a}`))
+      .join("\n");
     const system = `You are the planning module of an autonomous agent.
-Available actions: ${actions.join(", ")}.
+Available actions:
+${actionList}
 Plan the NEXT 1-3 concrete steps toward the goal. Each step's "params" field
 must be a JSON-encoded object with the arguments the tool needs.
 If the goal is already complete, return an empty steps array and explain why in "reasoning".`;

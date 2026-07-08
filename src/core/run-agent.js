@@ -13,7 +13,11 @@ import * as memory from "./memory.js";
  * @param {string} opts.agentType      e.g. "search-agent"
  * @param {string} opts.label          banner label, e.g. "SEARCH AGENT"
  * @param {string} opts.goal           the user's goal
- * @param {object} opts.toolRegistry   action → async fn
+ * @param {object} [opts.toolRegistry] action → async fn (static registry)
+ * @param {Function} [opts.toolRegistryFactory] (sessionId) => registry —
+ *        use when the registry needs the session id (e.g. orchestrator, whose
+ *        child sessions link to this parent session)
+ * @param {object} [opts.toolDescriptions] action → description for the planner
  * @param {number} [opts.maxIterations]
  * @param {string|null} [opts.resumeId] session to resume
  * @returns {Promise<never>} exits the process with 0 (success) or 1
@@ -23,6 +27,8 @@ export async function runAgenticAgent({
   label,
   goal,
   toolRegistry,
+  toolRegistryFactory,
+  toolDescriptions,
   maxIterations = 20,
   resumeId = null,
 }) {
@@ -45,11 +51,15 @@ export async function runAgenticAgent({
     console.log(`• Session: ${sessionId}`);
   }
 
+  const registry = toolRegistry ?? toolRegistryFactory?.(sessionId);
+  if (!registry) throw new Error("runAgenticAgent: toolRegistry эсвэл toolRegistryFactory өгнө үү");
+
   const loop = new AgenticLoop(
     sessionId,
     memory,
     process.env.ANTHROPIC_API_KEY,
-    toolRegistry,
+    registry,
+    { maxIterations, toolDescriptions },
   );
 
   const result = await loop.run(goal, maxIterations);

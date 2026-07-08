@@ -119,7 +119,13 @@ export function mergeContext(existing = {}, incoming = {}) {
 }
 
 /* ---------- sessions ---------- */
-export async function createSession(agentType, goal) {
+/**
+ * Create a session. Pass `parentSessionId` to nest this session under an
+ * orchestrator run — the parent gets a child pointer and this session records
+ * its parent, giving a hierarchical structure in Firebase:
+ *   sessions/<parent>/children/<child> and sessions/<child>/metadata/parent
+ */
+export async function createSession(agentType, goal, parentSessionId = null) {
   const sessionId = `${agentType}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   const metadata = {
     agentType,
@@ -128,9 +134,20 @@ export async function createSession(agentType, goal) {
     status: "running",
     iterations: 0,
     total_tokens: 0,
+    ...(parentSessionId ? { parent: parentSessionId } : {}),
   };
-  store.set(sessionId, { metadata, steps: [], context: {} });
+  store.set(sessionId, { metadata, steps: [], context: {}, children: [] });
   await fb(`sessions/${sessionId}/metadata`, "set", metadata);
+
+  if (parentSessionId) {
+    const parent = store.get(parentSessionId);
+    if (parent) (parent.children ??= []).push(sessionId);
+    await fb(`sessions/${parentSessionId}/children/${sessionId}`, "set", {
+      agentType,
+      goal,
+      timestamp_start: metadata.timestamp_start,
+    });
+  }
   return sessionId;
 }
 
