@@ -7,8 +7,9 @@ import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 import dotenv from "dotenv";
 import chalk from "chalk";
-import Anthropic from "@anthropic-ai/sdk";
+import { GoogleGenAI, ApiError } from "@google/genai";
 import fse from "fs-extra";
+import { toGeminiSchema } from "../core/gemini-schema.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const ROOT = path.resolve(__dirname, "..", "..");
@@ -16,7 +17,7 @@ export const OUTPUT_DIR = path.join(ROOT, "output");
 
 dotenv.config({ path: path.join(ROOT, ".env"), quiet: true });
 
-const MODEL = "claude-opus-4-8";
+const MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
 
 /* ---------- logging helpers ---------- */
 const clock = () => new Date().toTimeString().slice(0, 8);
@@ -44,12 +45,16 @@ export function requireEnv(...names) {
 }
 
 export function handleError(err) {
-  if (err instanceof Anthropic.AuthenticationError) {
-    fail("ANTHROPIC_API_KEY буруу эсвэл хүчингүй байна — .env файлаа шалгана уу");
-  } else if (err instanceof Anthropic.RateLimitError) {
-    fail("Claude API rate limit — түр хүлээгээд дахин оролдоно уу");
-  } else if (err instanceof Anthropic.APIError) {
-    fail(`Claude API алдаа (${err.status}): ${err.message}`);
+  if (err instanceof ApiError) {
+    if (err.status === 400 && /API_KEY_INVALID/.test(err.message)) {
+      fail("GEMINI_API_KEY буруу эсвэл хүчингүй байна — .env файлаа шалгана уу");
+    } else if (err.status === 403) {
+      fail("GEMINI_API_KEY-д хандах эрх байхгүй байна — .env файлаа шалгана уу");
+    } else if (err.status === 429) {
+      fail("Gemini API rate limit — түр хүлээгээд дахин оролдоно уу");
+    } else {
+      fail(`Gemini API алдаа (${err.status}): ${err.message}`);
+    }
   } else if (err?.code === "ENOENT") {
     fail(`Файл олдсонгүй: ${err.path}`);
   } else {
@@ -79,37 +84,41 @@ export function parseArgs(argv, { booleans = [], multi = [] } = {}) {
   return { positional, flags };
 }
 
-/* ---------- Claude ---------- */
+/* ---------- Gemini ---------- */
 let client;
-const getClient = () => (client ??= new Anthropic());
+const getClient = () => (client ??= new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY }));
 
-export async function callClaude(systemPrompt, userMessage, { maxTokens = 16000, schema = null } = {}) {
-  const params = {
-    model: MODEL,
-    max_tokens: maxTokens,
-    thinking: { type: "adaptive" },
-    system: systemPrompt,
-    messages: [{ role: "user", content: userMessage }],
+export async function callGemini(systemPrompt, userMessage, { maxTokens = 16000, schema = null } = {}) {
+  const config = {
+    systemInstruction: systemPrompt,
+    maxOutputTokens: maxTokens,
   };
   if (schema) {
-    params.output_config = { format: { type: "json_schema", schema } };
+    config.responseMimeType = "application/json";
+    config.responseSchema = toGeminiSchema(schema);
   }
 
   const t0 = Date.now();
-  const response = await getClient().messages.create(params);
+  const response = await getClient().models.generateContent({
+    model: MODEL,
+    contents: userMessage,
+    config,
+  });
   const sec = ((Date.now() - t0) / 1000).toFixed(1);
-  log(`${chalk.cyan("Claude")} ${MODEL} · ${sec}s · in ${response.usage.input_tokens} / out ${response.usage.output_tokens} tokens`);
+  const usage = response.usageMetadata ?? {};
+  log(`${chalk.cyan("Gemini")} ${MODEL} · ${sec}s · in ${usage.promptTokenCount ?? "?"} / out ${usage.candidatesTokenCount ?? "?"} tokens`);
 
-  if (response.stop_reason === "refusal") {
-    throw new Error("Claude хүсэлтийг аюулгүй байдлын үүднээс гүйцэтгэхээс татгалзлаа");
+  const finishReason = response.candidates?.[0]?.finishReason;
+  if (finishReason === "SAFETY" || finishReason === "PROHIBITED_CONTENT") {
+    throw new Error("Gemini хүсэлтийг аюулгүй байдлын үүднээс гүйцэтгэхээс татгалзлаа");
   }
-  if (response.stop_reason === "max_tokens") {
+  if (finishReason === "MAX_TOKENS") {
     log(chalk.yellow("⚠ Хариу max_tokens хязгаарт тулсан тул тасарсан байж болзошгүй"));
   }
 
-  const textBlocks = response.content.filter((b) => b.type === "text");
-  if (schema) return JSON.parse(textBlocks[0].text);
-  return textBlocks.map((b) => b.text).join("\n");
+  const text = response.text;
+  if (!text) throw new Error("Gemini хариу буцаасангүй");
+  return schema ? JSON.parse(text) : text;
 }
 
 /* ---------- main flow ---------- */
@@ -157,13 +166,13 @@ function git(args, cwd) {
 }
 
 export async function processRequest(requirement, { name, useGit = false, push = false } = {}) {
-  requireEnv("ANTHROPIC_API_KEY");
+  requireEnv("GEMINI_API_KEY");
   log(`🛠  Starting Code Agent — "${requirement}"`);
 
-  // Step 1 — Claude кодыг бичнэ
-  const result = await callClaude(SYSTEM, `Requirement: ${requirement}`, { schema: CODE_SCHEMA });
-  if (!result.files?.length) fail("Claude нэг ч файл үүсгэсэнгүй");
-  logStep(1, `Claude "${result.project_name}" төслийн ${result.files.length} файлыг бэлдлээ`);
+  // Step 1 — Gemini кодыг бичнэ
+  const result = await callGemini(SYSTEM, `Requirement: ${requirement}`, { schema: CODE_SCHEMA });
+  if (!result.files?.length) fail("Gemini нэг ч файл үүсгэсэнгүй");
+  logStep(1, `Gemini "${result.project_name}" төслийн ${result.files.length} файлыг бэлдлээ`);
 
   // Step 2 — хавтасны бүтэц үүсгэж файлуудыг бичнэ
   let projectName =

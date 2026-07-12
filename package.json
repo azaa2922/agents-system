@@ -1,7 +1,7 @@
 {
   "name": "agents-system",
   "version": "1.0.0",
-  "description": "Multi-agent AI system powered by Claude — 6 independent CLI agents",
+  "description": "Multi-agent AI system powered by Google Gemini — 6 independent CLI agents",
   "type": "module",
   "private": true,
   "engines": {
@@ -13,23 +13,30 @@
     "code": "node src/code-agent/index.js",
     "data": "node src/data-agent/index.js",
     "write": "node src/writer-agent/index.js",
-    "db": "node src/db-agent/index.js"
+    "db": "node src/db-agent/index.js",
+    "orchestrate": "node src/orchestrator/index.js",
+    "test": "node test-agentic-loop.js",
+    "test:agentic": "node test-agentic-loop.js",
+    "test:setup": "node test-agentic-setup.js"
   },
   "keywords": [
-    "claude",
-    "anthropic",
+    "gemini",
+    "google-genai",
     "agents",
     "multi-agent",
     "cli"
   ],
   "license": "MIT",
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.104.1",
+    "@google/genai": "^2.10.0",
     "axios": "^1.17.0",
     "chalk": "^5.6.2",
     "csv-parse": "^6.2.1",
     "dotenv": "^17.4.2",
     "fs-extra": "^11.3.5",
     "papaparse": "^5.5.3"
+  },
+  "optionalDependencies": {
+    "firebase-admin": "^13.0.0"
   }
 }

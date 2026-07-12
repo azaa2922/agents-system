@@ -1,14 +1,15 @@
 /**
- * Data Agent — CSV/JSON өгөгдлийг уншиж, Claude-оор шинжилгээ хийлгээд
+ * Data Agent — CSV/JSON өгөгдлийг уншиж, Gemini-ээр шинжилгээ хийлгээд
  * ASCII chart бүхий Markdown тайланг /output руу хадгална.
  */
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
 import chalk from "chalk";
-import Anthropic from "@anthropic-ai/sdk";
+import { GoogleGenAI, ApiError } from "@google/genai";
 import fse from "fs-extra";
 import Papa from "papaparse";
+import { toGeminiSchema } from "../core/gemini-schema.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const ROOT = path.resolve(__dirname, "..", "..");
@@ -16,7 +17,7 @@ export const OUTPUT_DIR = path.join(ROOT, "output");
 
 dotenv.config({ path: path.join(ROOT, ".env"), quiet: true });
 
-const MODEL = "claude-opus-4-8";
+const MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
 const SAMPLE_ROWS = 100;
 
 /* ---------- logging helpers ---------- */
@@ -45,12 +46,16 @@ export function requireEnv(...names) {
 }
 
 export function handleError(err) {
-  if (err instanceof Anthropic.AuthenticationError) {
-    fail("ANTHROPIC_API_KEY буруу эсвэл хүчингүй байна — .env файлаа шалгана уу");
-  } else if (err instanceof Anthropic.RateLimitError) {
-    fail("Claude API rate limit — түр хүлээгээд дахин оролдоно уу");
-  } else if (err instanceof Anthropic.APIError) {
-    fail(`Claude API алдаа (${err.status}): ${err.message}`);
+  if (err instanceof ApiError) {
+    if (err.status === 400 && /API_KEY_INVALID/.test(err.message)) {
+      fail("GEMINI_API_KEY буруу эсвэл хүчингүй байна — .env файлаа шалгана уу");
+    } else if (err.status === 403) {
+      fail("GEMINI_API_KEY-д хандах эрх байхгүй байна — .env файлаа шалгана уу");
+    } else if (err.status === 429) {
+      fail("Gemini API rate limit — түр хүлээгээд дахин оролдоно уу");
+    } else {
+      fail(`Gemini API алдаа (${err.status}): ${err.message}`);
+    }
   } else if (err?.code === "ENOENT") {
     fail(`Файл олдсонгүй: ${err.path}`);
   } else {
@@ -80,37 +85,41 @@ export function parseArgs(argv, { booleans = [], multi = [] } = {}) {
   return { positional, flags };
 }
 
-/* ---------- Claude ---------- */
+/* ---------- Gemini ---------- */
 let client;
-const getClient = () => (client ??= new Anthropic());
+const getClient = () => (client ??= new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY }));
 
-export async function callClaude(systemPrompt, userMessage, { maxTokens = 16000, schema = null } = {}) {
-  const params = {
-    model: MODEL,
-    max_tokens: maxTokens,
-    thinking: { type: "adaptive" },
-    system: systemPrompt,
-    messages: [{ role: "user", content: userMessage }],
+export async function callGemini(systemPrompt, userMessage, { maxTokens = 16000, schema = null } = {}) {
+  const config = {
+    systemInstruction: systemPrompt,
+    maxOutputTokens: maxTokens,
   };
   if (schema) {
-    params.output_config = { format: { type: "json_schema", schema } };
+    config.responseMimeType = "application/json";
+    config.responseSchema = toGeminiSchema(schema);
   }
 
   const t0 = Date.now();
-  const response = await getClient().messages.create(params);
+  const response = await getClient().models.generateContent({
+    model: MODEL,
+    contents: userMessage,
+    config,
+  });
   const sec = ((Date.now() - t0) / 1000).toFixed(1);
-  log(`${chalk.cyan("Claude")} ${MODEL} · ${sec}s · in ${response.usage.input_tokens} / out ${response.usage.output_tokens} tokens`);
+  const usage = response.usageMetadata ?? {};
+  log(`${chalk.cyan("Gemini")} ${MODEL} · ${sec}s · in ${usage.promptTokenCount ?? "?"} / out ${usage.candidatesTokenCount ?? "?"} tokens`);
 
-  if (response.stop_reason === "refusal") {
-    throw new Error("Claude хүсэлтийг аюулгүй байдлын үүднээс гүйцэтгэхээс татгалзлаа");
+  const finishReason = response.candidates?.[0]?.finishReason;
+  if (finishReason === "SAFETY" || finishReason === "PROHIBITED_CONTENT") {
+    throw new Error("Gemini хүсэлтийг аюулгүй байдлын үүднээс гүйцэтгэхээс татгалзлаа");
   }
-  if (response.stop_reason === "max_tokens") {
+  if (finishReason === "MAX_TOKENS") {
     log(chalk.yellow("⚠ Хариу max_tokens хязгаарт тулсан тул тасарсан байж болзошгүй"));
   }
 
-  const textBlocks = response.content.filter((b) => b.type === "text");
-  if (schema) return JSON.parse(textBlocks[0].text);
-  return textBlocks.map((b) => b.text).join("\n");
+  const text = response.text;
+  if (!text) throw new Error("Gemini хариу буцаасангүй");
+  return schema ? JSON.parse(text) : text;
 }
 
 /* ---------- main flow ---------- */
@@ -167,7 +176,7 @@ function profileData(rows) {
 }
 
 export async function processRequest(instruction, filePath) {
-  requireEnv("ANTHROPIC_API_KEY");
+  requireEnv("GEMINI_API_KEY");
   log(`📊 Starting Data Agent — "${instruction}"`);
 
   // Step 1 — өгөгдлийг унших, профайл гаргах
@@ -179,7 +188,7 @@ export async function processRequest(instruction, filePath) {
   const profile = profileData(rows);
   logStep(1, `Уншлаа: ${filePath} — ${profile.rows} мөр, ${profile.columns.length} багана (${profile.columns.join(", ")})`);
 
-  // Step 2 — Claude-д өгөх дээж бэлтгэх
+  // Step 2 — Gemini-д өгөх дээж бэлтгэх
   const sample = rows.slice(0, SAMPLE_ROWS);
   const sampled = rows.length > SAMPLE_ROWS;
   if (sampled) {
@@ -187,7 +196,7 @@ export async function processRequest(instruction, filePath) {
   }
   logStep(2, `Дээж бэлэн — ${sample.length} мөр + тоон баганын статистик`);
 
-  // Step 3 — Claude шинжилгээ хийнэ
+  // Step 3 — Gemini шинжилгээ хийнэ
   const userMsg = [
     `Instruction: ${instruction}`,
     `Dataset file: ${path.basename(full)}`,
@@ -198,8 +207,8 @@ export async function processRequest(instruction, filePath) {
       : `All rows (${rows.length}):`,
     JSON.stringify(sample, null, 2),
   ].join("\n\n");
-  const report = await callClaude(SYSTEM, userMsg);
-  logStep(3, "Claude шинжилгээ, ASCII chart бүхий тайлан бичлээ");
+  const report = await callGemini(SYSTEM, userMsg);
+  logStep(3, "Gemini шинжилгээ, ASCII chart бүхий тайлан бичлээ");
 
   // Step 4 — тайланг хадгалах
   await fse.ensureDir(OUTPUT_DIR);
@@ -210,7 +219,7 @@ export async function processRequest(instruction, filePath) {
     `- **Хүсэлт:** ${instruction}`,
     `- **Файл:** ${path.basename(full)}`,
     `- **Огноо:** ${new Date().toISOString()}`,
-    `- **Хэмжээ:** ${profile.rows} мөр × ${profile.columns.length} багана${sampled ? ` (Claude-д эхний ${SAMPLE_ROWS} мөрийн дээж + бүрэн статистик өгсөн)` : ""}`,
+    `- **Хэмжээ:** ${profile.rows} мөр × ${profile.columns.length} багана${sampled ? ` (Gemini-д эхний ${SAMPLE_ROWS} мөрийн дээж + бүрэн статистик өгсөн)` : ""}`,
     "",
     report,
     "",
