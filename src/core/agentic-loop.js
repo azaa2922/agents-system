@@ -5,7 +5,7 @@
  * The agent loops until the goal is complete, max iterations are reached,
  * or a fatal error occurs — no human intervention needed.
  *
- * LLM: Anthropic Claude (same stack as the rest of this repo). For tests or
+ * LLM: Google Gemini (same stack as the rest of this repo). For tests or
  * alternative providers, inject `options.llmCall(systemPrompt, userMessage,
  * { schema })` — it must return the parsed object when a schema is given.
  *
@@ -13,9 +13,10 @@
  * e.g. { search: async (params) => "...", write: async (params) => "..." }.
  * The planner may only choose actions that exist in the registry.
  */
-import Anthropic from "@anthropic-ai/sdk";
+import { GoogleGenAI, ApiError } from "@google/genai";
+import { toGeminiSchema } from "./gemini-schema.js";
 
-const MODEL = process.env.AGENTIC_LOOP_MODEL || "claude-opus-4-8";
+const MODEL = process.env.AGENTIC_LOOP_MODEL || process.env.GEMINI_MODEL || "gemini-2.5-flash";
 const MAX_CONSECUTIVE_FAILURES = 3;
 
 const clock = () => new Date().toTimeString().slice(0, 8);
@@ -71,7 +72,7 @@ export class AgenticLoop {
   /**
    * @param {string} sessionId    session created via memory.createSession()
    * @param {object} memory       the src/core/memory.js module (or compatible)
-   * @param {string|null} apiKey  Anthropic API key (falls back to ANTHROPIC_API_KEY)
+   * @param {string|null} apiKey  Gemini API key (falls back to GEMINI_API_KEY)
    * @param {object} toolRegistry action name → async function(params)
    * @param {object} [options]    { model, maxIterations, llmCall }
    */
@@ -81,7 +82,7 @@ export class AgenticLoop {
     }
     this.sessionId = sessionId;
     this.memory = memory;
-    this.apiKey = apiKey ?? process.env.ANTHROPIC_API_KEY ?? null;
+    this.apiKey = apiKey ?? process.env.GEMINI_API_KEY ?? null;
     this.tools = toolRegistry;
     this.toolDescriptions = options.toolDescriptions || {}; // action → what it does
     this.model = options.model || MODEL;
@@ -294,37 +295,41 @@ ${context?.accumulated_knowledge || "(none)"}`;
     if (this._llmCall) return await this._llmCall(systemPrompt, userMessage, { schema });
 
     if (!this.apiKey) {
-      const err = new Error("ANTHROPIC_API_KEY тохируулаагүй байна — .env файлаа шалгана уу");
+      const err = new Error("GEMINI_API_KEY тохируулаагүй байна — .env файлаа шалгана уу");
       err.fatal = true;
       throw err;
     }
-    this._client ??= new Anthropic({ apiKey: this.apiKey });
+    this._client ??= new GoogleGenAI({ apiKey: this.apiKey });
 
     const t0 = Date.now();
-    const response = await this._client.messages.create({
+    const response = await this._client.models.generateContent({
       model: this.model,
-      max_tokens: 8000,
-      thinking: { type: "adaptive" },
-      system: systemPrompt,
-      output_config: { format: { type: "json_schema", schema } },
-      messages: [{ role: "user", content: userMessage }],
+      contents: userMessage,
+      config: {
+        systemInstruction: systemPrompt,
+        maxOutputTokens: 8000,
+        responseMimeType: "application/json",
+        responseSchema: toGeminiSchema(schema),
+      },
     });
     const sec = ((Date.now() - t0) / 1000).toFixed(1);
-    log(`Claude ${this.model} · ${sec}s · in ${response.usage.input_tokens} / out ${response.usage.output_tokens} tokens`);
+    const usage = response.usageMetadata ?? {};
+    log(`Gemini ${this.model} · ${sec}s · in ${usage.promptTokenCount ?? "?"} / out ${usage.candidatesTokenCount ?? "?"} tokens`);
 
-    if (response.stop_reason === "refusal") {
-      throw new Error("Claude хүсэлтийг аюулгүй байдлын үүднээс гүйцэтгэхээс татгалзлаа");
+    const finishReason = response.candidates?.[0]?.finishReason;
+    if (finishReason === "SAFETY" || finishReason === "PROHIBITED_CONTENT") {
+      throw new Error("Gemini хүсэлтийг аюулгүй байдлын үүднээс гүйцэтгэхээс татгалзлаа");
     }
-    const textBlock = response.content.find((b) => b.type === "text");
-    if (!textBlock) throw new Error("Claude хариунд text блок алга");
-    return JSON.parse(textBlock.text);
+    const text = response.text;
+    if (!text) throw new Error("Gemini хариунд текст алга");
+    return JSON.parse(text);
   }
 
   _isFatal(error) {
     return (
       error?.fatal === true ||
-      error instanceof Anthropic.AuthenticationError ||
-      error instanceof Anthropic.PermissionDeniedError
+      (error instanceof ApiError &&
+        (error.status === 403 || (error.status === 400 && /API_KEY_INVALID/.test(error.message))))
     );
   }
 }

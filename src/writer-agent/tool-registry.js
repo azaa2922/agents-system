@@ -1,11 +1,11 @@
 /**
  * Writer Agent Tool Registry
- * Tools: write (Claude content generation → output/), file, think
+ * Tools: write (Gemini content generation → output/), file, think
  */
 import path from "node:path";
 import fse from "fs-extra";
 import {
-  callClaude,
+  callGemini,
   OUTPUT_DIR,
   timestamp,
   log,
@@ -36,7 +36,7 @@ Return polished, publication-ready Markdown in "content" — no YAML frontmatter
 export function createToolRegistry(defaults = {}) {
   return {
     /**
-     * Generate content with Claude and save it.
+     * Generate content with Gemini and save it.
      * params: { topic|brief|content, format?, tone?, length?, title? }
      * If 'content' is provided it is saved as-is (no generation).
      */
@@ -51,7 +51,7 @@ export function createToolRegistry(defaults = {}) {
         const brief = params.topic || params.brief || params.value;
         if (!brief) throw new Error("write tool: 'topic' эсвэл 'content' параметр шаардлагатай");
         log(`[Writer] Writing ${format} (${tone}/${length}): ${brief}`);
-        const result = await callClaude(buildSystem(tone, length, format), String(brief), {
+        const result = await callGemini(buildSystem(tone, length, format), String(brief), {
           schema: WRITE_SCHEMA,
         });
         title = result.title;
@@ -77,7 +77,7 @@ export function createToolRegistry(defaults = {}) {
     },
 
     file: makeFileTool({ outputDir: OUTPUT_DIR, log }),
-    think: makeThinkTool({ callClaude, label: "content-writing agent" }),
+    think: makeThinkTool({ callLLM: callGemini, label: "content-writing agent" }),
   };
 }
 

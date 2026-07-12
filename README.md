@@ -1,7 +1,7 @@
-# 🤖 agents-system — Claude дээр суурилсан олон агенттай систем
+# 🤖 agents-system — Google Gemini дээр суурилсан олон агенттай систем
 
-Claude API ашигладаг, тус бүрдээ бие даан ажиллах чадвартай **6 CLI агент** бүхий Node.js monorepo.
-Бүх агент `@anthropic-ai/sdk`-ээр `claude-opus-4-8` загварыг дууддаг бөгөөд үр дүнгээ `/output` хавтсанд timestamp-тай нэрээр хадгална.
+Google Gemini API ашигладаг, тус бүрдээ бие даан ажиллах чадвартай **6 CLI агент** бүхий Node.js monorepo.
+Бүх агент `@google/genai`-аар `gemini-2.5-flash` загварыг дууддаг бөгөөд үр дүнгээ `/output` хавтсанд timestamp-тай нэрээр хадгална.
 
 ## 📁 Бүтэц
 
@@ -32,14 +32,15 @@ Session бүр `src/core/memory.js`-ээр Firebase RTDB-д (тохируулб�
 cd agents-system
 npm install
 cp .env.example .env
-# .env дотор ANTHROPIC_API_KEY (заавал), TAVILY_API_KEY (search-agent-д) нэмнэ
+# .env дотор GEMINI_API_KEY (заавал), TAVILY_API_KEY (search-agent-д) нэмнэ
 ```
 
 Шаардлага: **Node.js 18+**
 
 | Орчны хувьсагч | Хэрэглээ |
 |---|---|
-| `ANTHROPIC_API_KEY` | Бүх агентад заавал — [platform.claude.com](https://platform.claude.com) |
+| `GEMINI_API_KEY` | Бүх агентад заавал — [aistudio.google.com/apikey](https://aistudio.google.com/apikey) |
+| `GEMINI_MODEL` | Загвар сонголт (заавал биш, default: `gemini-2.5-flash`) |
 | `TAVILY_API_KEY` | Search Agent-д заавал — [tavily.com](https://tavily.com) |
 | `GITHUB_TOKEN`, `GIT_REMOTE_URL` | Code Agent-ийн `--push` сонголтод (заавал биш) |
 | `DB_CONNECTION_STRING` | DB Agent-д нөөцөлсөн (одоогоор файл л үүсгэнэ) |
@@ -48,8 +49,8 @@ cp .env.example .env
 
 | # | Агент | Зорилго | CLI тушаал |
 |---|-------|---------|-----------|
-| 1 | 🔎 **Search Agent** | Claude хайлтын стратеги төлөвлөж, Tavily API-аар вэб хайлт хийгээд дүгнэлт бичнэ | `node src/search-agent/index.js "search for best React libraries"` |
-| 2 | 📂 **File Agent** | CSV/JSON/TXT/MD файлуудыг уншиж, Claude-ийн шийдсэн алхмаар хувиргана | `node src/file-agent/index.js "convert CSV to JSON" --file data.csv` |
+| 1 | 🔎 **Search Agent** | Gemini хайлтын стратеги төлөвлөж, Tavily API-аар вэб хайлт хийгээд дүгнэлт бичнэ | `node src/search-agent/index.js "search for best React libraries"` |
+| 2 | 📂 **File Agent** | CSV/JSON/TXT/MD файлуудыг уншиж, Gemini-ийн шийдсэн алхмаар хувиргана | `node src/file-agent/index.js "convert CSV to JSON" --file data.csv` |
 | 3 | 🛠 **Code Agent** | Шаардлагаас бүрэн төслийн код + README үүсгэж, сонголтоор git push хийнэ | `node src/code-agent/index.js "generate React todo app with useState"` |
 | 4 | 📊 **Data Agent** | CSV/JSON өгөгдөлд шинжилгээ хийж, ASCII chart бүхий тайлан гаргана | `node src/data-agent/index.js "analyze sales and find trends" --file sales.csv` |
 | 5 | ✍️ **Writer Agent** | Блог, имэйл, сошиал пост, баримтжуулалт бичиж frontmatter-тай хадгална | `node src/writer-agent/index.js "write a blog post about AI" --tone professional` |
@@ -65,20 +66,20 @@ node src/search-agent/index.js --help
 
 ### 1. 🔎 Search Agent
 
-**Зорилго:** Хэрэглэгчийн хүсэлтээр Claude хэдэн query хэрэгтэйг өөрөө шийдэж, Tavily API-аар вэб хайлт хийгээд үр дүнг нэгтгэн дүгнэлт бичнэ.
+**Зорилго:** Хэрэглэгчийн хүсэлтээр Gemini хэдэн query хэрэгтэйг өөрөө шийдэж, Tavily API-аар вэб хайлт хийгээд үр дүнг нэгтгэн дүгнэлт бичнэ.
 
 ```bash
 node src/search-agent/index.js "search for best React libraries"
 node src/search-agent/index.js "2026 оны JavaScript framework харьцуулалт"
 ```
 
-- **Урсгал:** Claude төлөвлөнө → Tavily хайна → Claude дүгнэнэ → файлд хадгална
+- **Урсгал:** Gemini төлөвлөнө → Tavily хайна → Gemini дүгнэнэ → файлд хадгална
 - **Үр дүн:** `output/search_YYYYMMDDHHmm.md` (дүгнэлт + түүхий үр дүн)
-- **Шаардлага:** `ANTHROPIC_API_KEY`, `TAVILY_API_KEY`
+- **Шаардлага:** `GEMINI_API_KEY`, `TAVILY_API_KEY`
 
 ### 2. 📂 File Agent
 
-**Зорилго:** Файл уншиж, хувиргалтын алхмуудыг Claude шийдэж гүйцэтгээд шинэ файл болгож хадгална. CSV ↔ JSON, markdown heading задлах, JSON нэгтгэх г.м.
+**Зорилго:** Файл уншиж, хувиргалтын алхмуудыг Gemini шийдэж гүйцэтгээд шинэ файл болгож хадгална. CSV ↔ JSON, markdown heading задлах, JSON нэгтгэх г.м.
 
 ```bash
 node src/file-agent/index.js "convert CSV to JSON" --file data.csv
@@ -104,7 +105,7 @@ node src/code-agent/index.js "generate HTML/CSS landing page" --git --push
 
 ### 4. 📊 Data Agent
 
-**Зорилго:** CSV/JSON өгөгдлийг уншиж (papaparse), тоон баганын статистикийг бодож, Claude-оор чиг хандлага/дүгнэлт + ASCII chart, table бүхий тайлан гаргуулна.
+**Зорилго:** CSV/JSON өгөгдлийг уншиж (papaparse), тоон баганын статистикийг бодож, Gemini-ээр чиг хандлага/дүгнэлт + ASCII chart, table бүхий тайлан гаргуулна.
 
 ```bash
 node src/data-agent/index.js "analyze sales data and find trends" --file sales.csv
@@ -113,7 +114,7 @@ node src/data-agent/index.js "compare Q1 vs Q2 performance" --file quarters.json
 ```
 
 - **Үр дүн:** `output/analysis_YYYYMMDDHHmm.md` — гол дүгнэлтүүд, ASCII chart/table
-- Том өгөгдөл дээр эхний 100 мөрийн дээж + бүх мөрөөр бодсон статистикийг Claude-д өгнө
+- Том өгөгдөл дээр эхний 100 мөрийн дээж + бүх мөрөөр бодсон статистикийг Gemini-д өгнө
 
 ### 5. ✍️ Writer Agent
 
@@ -130,7 +131,7 @@ node src/writer-agent/index.js "write 5 social media posts about Web3" --format 
 
 ### 6. 🗄 DB Agent
 
-**Зорилго:** Хүснэгтийн дизайн, migration, query-г Claude-оор зохиолгож SQL / Prisma / TypeORM хэлбэрээр файлд хадгална.
+**Зорилго:** Хүснэгтийн дизайн, migration, query-г Gemini-ээр зохиолгож SQL / Prisma / TypeORM хэлбэрээр файлд хадгална.
 
 ```bash
 node src/db-agent/index.js "design a users table with authentication fields"
@@ -160,7 +161,7 @@ node src/orchestrator/index.js "analyze sales.csv then design a database schema 
   - `--max-iterations N` — orchestrator-ийн давталтын хязгаар (default: 15)
   - `--sub-iterations N` — агент тус бүрийн дэд давталтын хязгаар (default: 10)
   - `--resume <id>` — тасалдсан orchestrator session-ийг үргэлжлүүлэх
-- **Шаардлага:** `ANTHROPIC_API_KEY` (search-д нэмж `TAVILY_API_KEY`)
+- **Шаардлага:** `GEMINI_API_KEY` (search-д нэмж `TAVILY_API_KEY`)
 - Нэг агент бүтэлгүйтвэл orchestrator зогсохгүй — үр дүнг нь "incomplete" гэж бүртгээд өөр замаар үргэлжилнэ.
 
 Програмчлалын хэрэглээ (embed):
@@ -190,11 +191,11 @@ npm test       # agentic loop + orchestrator test suite (offline)
 
 - **ES Modules** (`"type": "module"`), Node.js 18+
 - Бүх лог `[HH:MM:SS]` timestamp + алхмын дугаар + emoji-тэй
-- Claude API дуудлага бүрийн **хугацаа, токены тоо** логлогдоно
+- Gemini API дуудлага бүрийн **хугацаа, токены тоо** логлогдоно
 - Алдааг улаанаар хэвлэж `exit 1` (амжилттай бол `exit 0`)
 - Бүх үр дүнгийн файлын нэрэнд `YYYYMMDDHHmm` timestamp орно
 - Хоосон/олдоогүй файл, буруу флагийг ойлгомжтой мессежээр зогсооно
 
 ## 📦 Shared dependencies
 
-`@anthropic-ai/sdk` · `axios` · `dotenv` · `papaparse` · `csv-parse` · `fs-extra` · `chalk`
+`@google/genai` · `axios` · `dotenv` · `papaparse` · `csv-parse` · `fs-extra` · `chalk`

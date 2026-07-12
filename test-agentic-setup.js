@@ -15,7 +15,7 @@ console.log("✓ Can import memory module");
 console.log("\n✅ Setup validation passed!\n");
 
 console.log("Next steps:");
-console.log("1. Add ANTHROPIC_API_KEY + TAVILY_API_KEY to .env");
+console.log("1. Add GEMINI_API_KEY + TAVILY_API_KEY to .env");
 console.log("2. Run the full suite: node test-agentic-loop.js");
 console.log("3. Run: node src/search-agent/index.js 'Find React frameworks'");
 console.log("4. Monitor iterations in Firebase (optional)\n");

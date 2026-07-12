@@ -57,7 +57,7 @@ export async function runAgenticAgent({
   const loop = new AgenticLoop(
     sessionId,
     memory,
-    process.env.ANTHROPIC_API_KEY,
+    process.env.GEMINI_API_KEY,
     registry,
     { maxIterations, toolDescriptions },
   );

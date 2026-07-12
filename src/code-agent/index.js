@@ -8,7 +8,7 @@ import { createToolRegistry } from "./tool-registry.js";
 import { runAgenticAgent, loopFlags } from "../core/run-agent.js";
 
 const HELP = `
-🛠  Code Agent — Claude-оор төслийн код үүсгэгч (agentic loop)
+🛠  Code Agent — Gemini-ээр төслийн код үүсгэгч (agentic loop)
 
 Хэрэглээ:
   node src/code-agent/index.js "<шаардлага>" [--name <төслийн-нэр>] [--max-iterations N] [--resume <sessionId>]
@@ -17,11 +17,11 @@ const HELP = `
   node src/code-agent/index.js "generate a React todo app with useState"
   node src/code-agent/index.js "create a Node.js Express server with 3 routes" --name my-api
 
-Tools: code (Claude төслийн код → output/), file, write, think
+Tools: code (Gemini төслийн код → output/), file, write, think
 Урсгал: plan → execute → reflect — зорилго биелтэл давтана.
 
 Үр дүн: output/PROJECT_NAME/ — бүх эх файл + README.md
-Шаардлага: .env дотор ANTHROPIC_API_KEY
+Шаардлага: .env дотор GEMINI_API_KEY
 Сонголтоор: FIREBASE_DATABASE_URL + FIREBASE_SERVICE_ACCOUNT_PATH (session тракинг)
 `;
 
@@ -40,7 +40,7 @@ if (!requirement) {
 }
 
 try {
-  requireEnv("ANTHROPIC_API_KEY");
+  requireEnv("GEMINI_API_KEY");
   const goal = typeof flags.name === "string" ? `${requirement} (project name: ${flags.name})` : requirement;
   await runAgenticAgent({
     agentType: "code-agent",

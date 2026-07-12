@@ -8,7 +8,7 @@ import { createToolRegistry } from "./tool-registry.js";
 import { runAgenticAgent, loopFlags } from "../core/run-agent.js";
 
 const HELP = `
-📊 Data Agent — Claude-оор өгөгдлийн шинжилгээ (agentic loop)
+📊 Data Agent — Gemini-ээр өгөгдлийн шинжилгээ (agentic loop)
 
 Хэрэглээ:
   node src/data-agent/index.js "<заавар>" --file <зам> [--max-iterations N] [--resume <sessionId>]
@@ -21,7 +21,7 @@ Tools: data (CSV/JSON шинжилгээ), file, write (тайлан → output/
 Дэмжих форматууд: CSV (papaparse), JSON (объектын массив)
 
 Үр дүн: output/analysis_YYYYMMDDHHmm.md
-Шаардлага: .env дотор ANTHROPIC_API_KEY
+Шаардлага: .env дотор GEMINI_API_KEY
 Сонголтоор: FIREBASE_DATABASE_URL + FIREBASE_SERVICE_ACCOUNT_PATH (session тракинг)
 `;
 
@@ -45,7 +45,7 @@ if (!file) {
 }
 
 try {
-  requireEnv("ANTHROPIC_API_KEY");
+  requireEnv("GEMINI_API_KEY");
   await runAgenticAgent({
     agentType: "data-agent",
     label: "DATA AGENT",

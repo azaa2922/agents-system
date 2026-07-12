@@ -39,42 +39,42 @@ import { createToolRegistry as dbRegistry } from "../db-agent/tool-registry.js";
 export const AGENTS = {
   search: {
     createRegistry: searchRegistry,
-    requiresEnv: ["ANTHROPIC_API_KEY", "TAVILY_API_KEY"],
+    requiresEnv: ["GEMINI_API_KEY", "TAVILY_API_KEY"],
     description:
-      'Web search & research via Tavily + Claude. Use to find current information, ' +
+      'Web search & research via Tavily + Gemini. Use to find current information, ' +
       'compare options, or gather documentation. Call with params {"goal": "<what to research>"}.',
   },
   code: {
     createRegistry: codeRegistry,
-    requiresEnv: ["ANTHROPIC_API_KEY"],
+    requiresEnv: ["GEMINI_API_KEY"],
     description:
       'Generate runnable project code (any stack) into output/. Use to scaffold apps, APIs, ' +
       'or scripts. Call with params {"goal": "<what to build, incl. stack/name>"}.',
   },
   data: {
     createRegistry: dataRegistry,
-    requiresEnv: ["ANTHROPIC_API_KEY"],
+    requiresEnv: ["GEMINI_API_KEY"],
     description:
       'Analyze a CSV/JSON dataset and produce a report with stats and tables. ' +
       'Call with params {"goal": "<analysis incl. the data file path, e.g. sales.csv>"}.',
   },
   file: {
     createRegistry: fileRegistry,
-    requiresEnv: ["ANTHROPIC_API_KEY"],
+    requiresEnv: ["GEMINI_API_KEY"],
     description:
       'Read, convert, and transform files (CSV/JSON/TXT/Markdown). ' +
       'Call with params {"goal": "<transformation incl. the input file path>"}.',
   },
   write: {
     createRegistry: writerRegistry,
-    requiresEnv: ["ANTHROPIC_API_KEY"],
+    requiresEnv: ["GEMINI_API_KEY"],
     description:
       'Write content: blog posts, emails, social posts, or documentation, saved to output/. ' +
       'Call with params {"goal": "<what to write, tone/format if relevant>"}.',
   },
   db: {
     createRegistry: dbRegistry,
-    requiresEnv: ["ANTHROPIC_API_KEY"],
+    requiresEnv: ["GEMINI_API_KEY"],
     description:
       'Design database schemas, migrations, and queries (SQL/Prisma/TypeORM) into output/. ' +
       'Call with params {"goal": "<schema/query to design, format if relevant>"}.',
@@ -93,7 +93,7 @@ export const ORCHESTRATOR_TOOL_DESCRIPTIONS = Object.fromEntries(
  *
  * @param {object} opts
  * @param {object} [opts.memory]          memory module (defaults to core memory)
- * @param {string|null} [opts.apiKey]     Anthropic key for child loops
+ * @param {string|null} [opts.apiKey]     Gemini key for child loops
  * @param {string} opts.parentSessionId   orchestrator session that owns the children
  * @param {string[]} [opts.agents]        subset of agent names to expose
  * @param {number} [opts.maxSubIterations] iteration cap for each child agent loop
@@ -102,7 +102,7 @@ export const ORCHESTRATOR_TOOL_DESCRIPTIONS = Object.fromEntries(
  */
 export function createOrchestratorRegistry({
   memory: mem = memory,
-  apiKey = process.env.ANTHROPIC_API_KEY ?? null,
+  apiKey = process.env.GEMINI_API_KEY ?? null,
   parentSessionId,
   agents = Object.keys(AGENTS),
   maxSubIterations = 10,
@@ -178,7 +178,7 @@ export function createOrchestratorRegistry({
 export class Orchestrator {
   constructor({
     memory: mem = memory,
-    apiKey = process.env.ANTHROPIC_API_KEY ?? null,
+    apiKey = process.env.GEMINI_API_KEY ?? null,
     agents = Object.keys(AGENTS),
     maxIterations = 15,
     maxSubIterations = 10,

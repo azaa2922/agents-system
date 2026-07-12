@@ -1,12 +1,12 @@
 /**
  * Search Agent Tool Registry
- * Maps agentic-loop actions to real implementations (Tavily + Claude + output/).
+ * Maps agentic-loop actions to real implementations (Tavily + Gemini + output/).
  */
 import path from "node:path";
 import fse from "fs-extra";
 import {
   tavilySearch,
-  callClaude,
+  callGemini,
   OUTPUT_DIR,
   timestamp,
   log,
@@ -29,7 +29,7 @@ export function createToolRegistry() {
       return `Query "${query}" → ${results.length} results\n${digest || "(no results)"}`;
     },
 
-    /** Summarize collected results with Claude. params: { request } */
+    /** Summarize collected results with Gemini. params: { request } */
     async think(params) {
       const request = params.request || params.value || "Summarize the findings so far";
       if (collected.length === 0) return "No search results collected yet — run a search first.";
@@ -42,7 +42,7 @@ export function createToolRegistry() {
               .join("\n"),
         )
         .join("\n\n");
-      return await callClaude(
+      return await callGemini(
         `You are the analysis module of a web-search agent. Write a well-structured
 Markdown summary that directly answers the request, citing source URLs inline.
 Answer in the same language as the request.`,

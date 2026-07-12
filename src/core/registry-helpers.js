@@ -82,14 +82,14 @@ export function makeWriteTool({ outputDir, timestamp, log, prefix = "note" }) {
 }
 
 /**
- * Generic think tool: free-form reasoning via the agent's own callClaude.
+ * Generic think tool: free-form reasoning via the agent's own callGemini.
  * params: { request | question }
  */
-export function makeThinkTool({ callClaude, label = "agent" }) {
+export function makeThinkTool({ callLLM, label = "agent" }) {
   return async function think(params) {
     const request = params.request || params.question || params.value;
     if (!request) return "Nothing to think about — provide a 'request' parameter.";
-    return await callClaude(
+    return await callLLM(
       `You are the reasoning module of a ${label}. Think through the request and
 answer concisely in the same language as the request. Do not use tools; just reason.`,
       String(request),

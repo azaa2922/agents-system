@@ -473,7 +473,7 @@ console.log("\n" + "=".repeat(50));
 if (failed === 0) {
   console.log(`✅ Бүх тест амжилттай — ${passed} passed`);
   console.log("\nNext steps:");
-  console.log("  1. .env дотор ANTHROPIC_API_KEY, TAVILY_API_KEY тохируулна");
+  console.log("  1. .env дотор GEMINI_API_KEY, TAVILY_API_KEY тохируулна");
   console.log('  2. node src/search-agent/index.js "Find React frameworks"');
   console.log("  3. Firebase тохируулбал session тракинг автоматаар идэвхжинэ");
   process.exit(0);

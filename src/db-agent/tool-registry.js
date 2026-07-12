@@ -1,10 +1,10 @@
 /**
  * DB Agent Tool Registry
- * Tools: db (Claude schema generation → output/), file, write, think
+ * Tools: db (Gemini schema generation → output/), file, write, think
  */
 import path from "node:path";
 import fse from "fs-extra";
-import { callClaude, OUTPUT_DIR, OUTPUT_FORMATS, timestamp, log } from "./agent.js";
+import { callGemini, OUTPUT_DIR, OUTPUT_FORMATS, timestamp, log } from "./agent.js";
 import { makeFileTool, makeWriteTool, makeThinkTool } from "../core/registry-helpers.js";
 
 const DB_SCHEMA = {
@@ -44,7 +44,7 @@ export function createToolRegistry(defaults = {}) {
       const fmt = OUTPUT_FORMATS[format];
 
       log(`[DBGen] ${format.toUpperCase()}: ${request}`);
-      const result = await callClaude(buildSystem(fmt.label), String(request), { schema: DB_SCHEMA });
+      const result = await callGemini(buildSystem(fmt.label), String(request), { schema: DB_SCHEMA });
 
       await fse.ensureDir(OUTPUT_DIR);
       const file = path.join(OUTPUT_DIR, `schema_${timestamp()}${fmt.ext}`);
@@ -56,7 +56,7 @@ export function createToolRegistry(defaults = {}) {
 
     file: makeFileTool({ outputDir: OUTPUT_DIR, log }),
     write: makeWriteTool({ outputDir: OUTPUT_DIR, timestamp, log, prefix: "db_notes" }),
-    think: makeThinkTool({ callClaude, label: "database design agent" }),
+    think: makeThinkTool({ callLLM: callGemini, label: "database design agent" }),
   };
 }
 

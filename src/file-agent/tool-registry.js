@@ -4,7 +4,7 @@
  */
 import path from "node:path";
 import fse from "fs-extra";
-import { callClaude, OUTPUT_DIR, timestamp, log } from "./agent.js";
+import { callGemini, OUTPUT_DIR, timestamp, log } from "./agent.js";
 import { makeFileTool, makeWriteTool, makeThinkTool } from "../core/registry-helpers.js";
 
 const MAX_INPUT_CHARS = 150_000;
@@ -34,7 +34,7 @@ export function createToolRegistry() {
     /**
      * File operations. params:
      *   { operation: "read"|"create"|"append"|"list", file, content }
-     *   { operation: "transform", file, instruction } → Claude transforms, saves to output/
+     *   { operation: "transform", file, instruction } → Gemini transforms, saves to output/
      */
     async file(params) {
       if (params.operation !== "transform") return baseFileTool(params);
@@ -52,7 +52,7 @@ export function createToolRegistry() {
       }
 
       log(`[Transform] ${file}: ${instruction}`);
-      const result = await callClaude(
+      const result = await callGemini(
         SYSTEM,
         `Instruction: ${instruction}\n\n--- FILE: ${path.basename(full)} ---\n${text}`,
         { schema: TRANSFORM_SCHEMA },
@@ -70,7 +70,7 @@ export function createToolRegistry() {
     },
 
     write: makeWriteTool({ outputDir: OUTPUT_DIR, timestamp, log, prefix: "file_notes" }),
-    think: makeThinkTool({ callClaude, label: "file-processing agent" }),
+    think: makeThinkTool({ callLLM: callGemini, label: "file-processing agent" }),
   };
 }
 

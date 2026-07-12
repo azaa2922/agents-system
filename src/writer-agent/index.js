@@ -8,7 +8,7 @@ import { createToolRegistry } from "./tool-registry.js";
 import { runAgenticAgent, loopFlags } from "../core/run-agent.js";
 
 const HELP = `
-✍️  Writer Agent — Claude-оор контент бичигч (agentic loop)
+✍️  Writer Agent — Gemini-ээр контент бичигч (agentic loop)
 
 Хэрэглээ:
   node src/writer-agent/index.js "<сэдэв/заавар>" [--tone ...] [--length ...] [--format ...] [--max-iterations N] [--resume <sessionId>]
@@ -22,10 +22,10 @@ const HELP = `
   --length  ${Object.keys(LENGTHS).join(" | ")}  (default: medium)
   --format  ${FORMATS.join(" | ")}  (default: blog)
 
-Tools: write (Claude контент → output/), file, think
+Tools: write (Gemini контент → output/), file, think
 
 Үр дүн: output/content_YYYYMMDDHHmm.md — YAML frontmatter-тэй
-Шаардлага: .env дотор ANTHROPIC_API_KEY
+Шаардлага: .env дотор GEMINI_API_KEY
 Сонголтоор: FIREBASE_DATABASE_URL + FIREBASE_SERVICE_ACCOUNT_PATH (session тракинг)
 `;
 
@@ -44,7 +44,7 @@ if (!brief) {
 }
 
 try {
-  requireEnv("ANTHROPIC_API_KEY");
+  requireEnv("GEMINI_API_KEY");
   await runAgenticAgent({
     agentType: "writer-agent",
     label: "WRITER AGENT",

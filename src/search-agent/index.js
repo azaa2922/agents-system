@@ -14,7 +14,7 @@ import { createToolRegistry } from "./tool-registry.js";
 import { runAgenticAgent, loopFlags } from "../core/run-agent.js";
 
 const HELP = `
-🔎 Search Agent — autonomous Claude + Tavily вэб хайлт (agentic loop)
+🔎 Search Agent — autonomous Gemini + Tavily вэб хайлт (agentic loop)
 
 Хэрэглээ:
   node src/search-agent/index.js "<хайх зүйл>" [--max-iterations N] [--resume <sessionId>]
@@ -23,9 +23,9 @@ const HELP = `
   node src/search-agent/index.js "Find React frameworks and compare them"
   node src/search-agent/index.js "2026 оны JavaScript framework-үүдийн харьцуулалт"
 
-Tools: search (Tavily), think (Claude дүгнэлт), write (output/ руу тайлан)
+Tools: search (Tavily), think (Gemini дүгнэлт), write (output/ руу тайлан)
 
-Шаардлага: .env дотор ANTHROPIC_API_KEY, TAVILY_API_KEY
+Шаардлага: .env дотор GEMINI_API_KEY, TAVILY_API_KEY
 Сонголтоор: FIREBASE_DATABASE_URL + FIREBASE_SERVICE_ACCOUNT_PATH (session тракинг)
 `;
 
@@ -55,7 +55,7 @@ if (!goal) {
 }
 
 try {
-  requireEnv("ANTHROPIC_API_KEY", "TAVILY_API_KEY");
+  requireEnv("GEMINI_API_KEY", "TAVILY_API_KEY");
   await runAgenticAgent({
     agentType: "search-agent",
     label: "SEARCH AGENT",

@@ -8,7 +8,7 @@ import { createToolRegistry } from "./tool-registry.js";
 import { runAgenticAgent, loopFlags } from "../core/run-agent.js";
 
 const HELP = `
-📂 File Agent — Claude-оор файл хувиргагч (agentic loop)
+📂 File Agent — Gemini-ээр файл хувиргагч (agentic loop)
 
 Хэрэглээ:
   node src/file-agent/index.js "<заавар>" --file <зам> [--file <зам2> ...] [--max-iterations N] [--resume <sessionId>]
@@ -21,7 +21,7 @@ Tools: file (read/create/append/list/transform), write, think
 Дэмжих форматууд: CSV, JSON, TXT, Markdown
 
 Үр дүн: output/<нэр>_YYYYMMDDHHmm.<өргөтгөл>
-Шаардлага: .env дотор ANTHROPIC_API_KEY
+Шаардлага: .env дотор GEMINI_API_KEY
 Сонголтоор: FIREBASE_DATABASE_URL + FIREBASE_SERVICE_ACCOUNT_PATH (session тракинг)
 `;
 
@@ -45,7 +45,7 @@ if (files.length === 0) {
 }
 
 try {
-  requireEnv("ANTHROPIC_API_KEY");
+  requireEnv("GEMINI_API_KEY");
   await runAgenticAgent({
     agentType: "file-agent",
     label: "FILE AGENT",

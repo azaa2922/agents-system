@@ -1,10 +1,10 @@
 /**
  * Code Agent Tool Registry
- * Tools: code (Claude project generation), file, write, think
+ * Tools: code (Gemini project generation), file, write, think
  */
 import path from "node:path";
 import fse from "fs-extra";
-import { callClaude, OUTPUT_DIR, timestamp, log } from "./agent.js";
+import { callGemini, OUTPUT_DIR, timestamp, log } from "./agent.js";
 import { makeFileTool, makeWriteTool, makeThinkTool, safeJoin } from "../core/registry-helpers.js";
 
 const CODE_SCHEMA = {
@@ -38,7 +38,7 @@ Rules:
 
 export function createToolRegistry() {
   return {
-    /** Generate project code with Claude and write it under output/.
+    /** Generate project code with Gemini and write it under output/.
      *  params: { description|requirement, language?, name? } */
     async code(params) {
       const requirement = params.description || params.requirement || params.value;
@@ -48,8 +48,8 @@ export function createToolRegistry() {
       const prompt = params.language
         ? `Requirement: ${requirement}\nLanguage/stack: ${params.language}`
         : `Requirement: ${requirement}`;
-      const result = await callClaude(SYSTEM, prompt, { schema: CODE_SCHEMA });
-      if (!result.files?.length) throw new Error("Claude нэг ч файл үүсгэсэнгүй");
+      const result = await callGemini(SYSTEM, prompt, { schema: CODE_SCHEMA });
+      if (!result.files?.length) throw new Error("Gemini нэг ч файл үүсгэсэнгүй");
 
       const projectName =
         String(params.name || result.project_name || "project")
@@ -76,7 +76,7 @@ export function createToolRegistry() {
 
     file: makeFileTool({ outputDir: OUTPUT_DIR, log }),
     write: makeWriteTool({ outputDir: OUTPUT_DIR, timestamp, log, prefix: "code_notes" }),
-    think: makeThinkTool({ callClaude, label: "code-generation agent" }),
+    think: makeThinkTool({ callLLM: callGemini, label: "code-generation agent" }),
   };
 }
 

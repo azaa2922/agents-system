@@ -34,7 +34,7 @@ ${ALL.map((n) => `  • ${n.padEnd(7)} ${AGENTS[n].description.split(".")[0]}.`)
   --sub-iterations N   Агент тус бүрийн дэд давталтын хязгаар (default: 10)
   --resume <id>        Тасалдсан orchestrator session-ийг үргэлжлүүлэх
 
-Шаардлага: .env дотор ANTHROPIC_API_KEY (search агентад нэмж TAVILY_API_KEY)
+Шаардлага: .env дотор GEMINI_API_KEY (search агентад нэмж TAVILY_API_KEY)
 Сонголтоор: FIREBASE_DATABASE_URL + FIREBASE_SERVICE_ACCOUNT_PATH (session тракинг)
 `;
 
@@ -75,8 +75,8 @@ if (agentsFlag) {
   }
 }
 
-if (!process.env.ANTHROPIC_API_KEY) {
-  console.error('✗ ANTHROPIC_API_KEY тохируулаагүй байна — "cp .env.example .env" хийгээд түлхүүрээ оруулна уу');
+if (!process.env.GEMINI_API_KEY) {
+  console.error('✗ GEMINI_API_KEY тохируулаагүй байна — "cp .env.example .env" хийгээд түлхүүрээ оруулна уу');
   process.exit(1);
 }
 if (agents.includes("search") && !process.env.TAVILY_API_KEY) {
@@ -96,7 +96,7 @@ try {
     toolRegistryFactory: (parentSessionId) =>
       createOrchestratorRegistry({
         memory,
-        apiKey: process.env.ANTHROPIC_API_KEY,
+        apiKey: process.env.GEMINI_API_KEY,
         parentSessionId,
         agents,
         maxSubIterations,

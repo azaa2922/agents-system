@@ -1,11 +1,11 @@
 /**
  * Data Agent Tool Registry
- * Tools: data (CSV/JSON analysis with Claude), file, write, think
+ * Tools: data (CSV/JSON analysis with Gemini), file, write, think
  */
 import path from "node:path";
 import fse from "fs-extra";
 import Papa from "papaparse";
-import { callClaude, OUTPUT_DIR, timestamp, log } from "./agent.js";
+import { callGemini, OUTPUT_DIR, timestamp, log } from "./agent.js";
 import { makeFileTool, makeWriteTool, makeThinkTool } from "../core/registry-helpers.js";
 
 const SAMPLE_ROWS = 100;
@@ -52,7 +52,7 @@ function profileData(rows) {
 
 export function createToolRegistry() {
   return {
-    /** Analyze a CSV/JSON file with Claude. params: { file, analysis|instruction } */
+    /** Analyze a CSV/JSON file with Gemini. params: { file, analysis|instruction } */
     async data(params) {
       const file = params.file || params.path;
       const instruction = params.analysis || params.instruction || params.value || "Analyze this dataset";
@@ -79,12 +79,12 @@ export function createToolRegistry() {
         JSON.stringify(sample, null, 2),
       ].join("\n\n");
 
-      return await callClaude(SYSTEM, userMsg);
+      return await callGemini(SYSTEM, userMsg);
     },
 
     file: makeFileTool({ outputDir: OUTPUT_DIR, log }),
     write: makeWriteTool({ outputDir: OUTPUT_DIR, timestamp, log, prefix: "analysis" }),
-    think: makeThinkTool({ callClaude, label: "data-analysis agent" }),
+    think: makeThinkTool({ callLLM: callGemini, label: "data-analysis agent" }),
   };
 }
 
